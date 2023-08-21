@@ -1,0 +1,9 @@
+../UserLib/Src/MAX31855.c:16:6:Init_MAX31855	1
+../UserLib/Src/MAX31855.c:26:6:InitAquisition_MAX31855	1
+../UserLib/Src/MAX31855.c:35:6:HandlerAquisition_MAX31855	6
+../UserLib/Src/MAX31855.c:55:6:HAL_SPI_RxCpltCallback	2
+../UserLib/Src/MAX31855.c:68:6:Handler_MAX31855	7
+../UserLib/Src/MAX31855.c:99:6:InterruptControl_MAX31855	4
+../UserLib/Src/MAX31855.c:120:7:GetTemperatureExternal_MAX31855	3
+../UserLib/Src/MAX31855.c:134:7:GetTemperatureInternal_MAX31855	3
+../UserLib/Src/MAX31855.c:148:18:GetError_MAX31855	1

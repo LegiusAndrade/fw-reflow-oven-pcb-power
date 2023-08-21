@@ -1,0 +1,10 @@
+../Core/Src/main.c:956:6:DMACallbackADC1	0	static,ignoring_inline_asm
+../Core/Src/main.c:1082:13:Hw_Buck_Deinit	40	static
+../Core/Src/main.c:1119:13:SetError	16	static
+../Core/Src/main.c:960:6:DMACallbackADC2	0	static
+../Core/Src/main.c:285:6:SystemClock_Config	88	static,ignoring_inline_asm
+../Core/Src/main.c:191:5:main	184	static,ignoring_inline_asm
+../Core/Src/main.c:845:6:HAL_GPIO_EXTI_Callback	8	static
+../Core/Src/main.c:869:6:HAL_TIM_PeriodElapsedCallback	24	static
+../Core/Src/main.c:1030:6:HAL_TIM_IC_CaptureCallback	16	static,ignoring_inline_asm
+../Core/Src/main.c:1149:6:Error_Handler	0	static,ignoring_inline_asm
