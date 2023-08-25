@@ -17,14 +17,16 @@
  */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
-#include "main.h"
+
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 #include <limits.h>
-#include "../../UserLib/Inc/NTC 10K 3989.h"
 
+#include "../../UserLib/Inc/NTC 10K 3989.h"
+#include "MAX31855 r0.h"
+#include "main.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

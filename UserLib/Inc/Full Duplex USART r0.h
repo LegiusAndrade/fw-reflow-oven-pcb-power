@@ -19,12 +19,22 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include <stm32g4xx_hal_uart.h>
+#include "stm32g4xx.h"
 
 /********************************************************************************
  ******* DEFINES
  *******************************************************************************/
 
+
+typedef struct
+{
+	UART_HandleTypeDef *uart;
+	uint16_t size_buffer;
+} FD_CONFIG_t;
+
+
+/* Typedef used to opaque pointer to FD handler */
+typedef struct FD_struct_t FD_t;
 
 /********************************************************************************
  ******* VARIABLES
@@ -38,7 +48,12 @@
  ******* PROTOTYPE OF FUNCTIONS
  *******************************************************************************/
 
-size_t FullDuplexUsart_Init(UART_HandleTypeDef *huart);
-size_t FDUSART_SendMessage(UART_HandleTypeDef *huart, uint8_t Cmd, uint8_t *Buf, size_t Len);
+FD_t* FDUSART_Init(const FD_CONFIG_t *config);
+void FDUSART_DeInit(FD_t **fd);
+
+size_t FDUSART_InterruptControl(FD_t *FDInstance);
+
+size_t FDUSART_SendMessage(FD_t *FDInstance , uint8_t Cmd, uint8_t *Buf, size_t Len);
+size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len);
 #endif
 

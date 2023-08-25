@@ -9,8 +9,7 @@
  ********************************************************************************/
 
 #include <MAX31855 r0.h>
-#include "stm32g431xx.h"
-#include "stm32g4xx_hal.h"
+
 #include <stdbool.h>
 
 void Init_MAX31855(SPI_HandleTypeDef *_hspi1, GPIO_TypeDef *_GPIO_CS, uint16_t _Pin_CS)
