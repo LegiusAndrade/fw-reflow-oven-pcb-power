@@ -13,11 +13,15 @@
 #ifndef FULL_DUPLEX_USART_H_
 #define FULL_DUPLEX_USART_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /********************************************************************************
  ******* INCLUDES
  *******************************************************************************/
-#include <stdint.h>
-#include <stddef.h>
+#include "stdint.h"
+#include "stddef.h"
 
 #include "stm32g4xx.h"
 
@@ -55,5 +59,10 @@ size_t FDUSART_InterruptControl(FD_t *FDInstance);
 
 size_t FDUSART_SendMessage(FD_t *FDInstance , uint8_t Cmd, uint8_t *Buf, size_t Len);
 size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 

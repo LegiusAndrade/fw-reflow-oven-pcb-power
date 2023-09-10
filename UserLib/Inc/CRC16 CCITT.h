@@ -11,6 +11,10 @@
 #ifndef INC_CRC16_CCITT_H_
 #define INC_CRC16_CCITT_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /********************************************************************************
  ******* INCLUDES
  *******************************************************************************/
@@ -19,6 +23,10 @@
 /********************************************************************************
  ******* PROTOTYPE OF FUNCTIONS
  *******************************************************************************/
-uint16_t CRC16_CCITT_Calculate(const uint8_t * data, size_t lenght);
+uint16_t CRC16_CCITT_Calculate(const uint8_t *data, size_t lenght);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* INC_CRC16_CCITT_H_ */
