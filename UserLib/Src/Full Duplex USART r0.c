@@ -36,7 +36,7 @@
 /********************************************************************************
  ******* DEFINES
  *******************************************************************************/
-#define	MAX_UART_INSTANCES						10			// Max instances USART in same time in this library
+#define	MAX_UART_INSTANCES						3			// Max instances USART in same time in this library
 
 #define FDUSART_BUFFER_LINES					20 			// Size array buffer
 #define FDUSART_SIZE_MAX_MESSAGE				50			// MAX size in one line of the buffer
@@ -211,7 +211,7 @@ size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 
 bool _FDUSART_CheckHeader(size_t index)
 {
-	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) (MESSAGE_ID_SEND & 0xFF00) >> 8 && gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
+	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8) && gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
 	{
 		return true;
 	}
@@ -229,7 +229,7 @@ bool _FDUSART_CheckProtocolVersion(size_t index)
 
 bool _FDUSART_CheckSizeMessage(size_t index)
 {
-	gInstances_Receiving[index].size_message = ((uint16_t) gInstances_Receiving[index].buffer_received[7] << 8 | gInstances_Receiving[index].buffer_received[8]);
+	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[7] << 8) | gInstances_Receiving[index].buffer_received[8]);
 	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - SIZE_HEADER))
 	{
 		return true;
@@ -309,6 +309,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 				gInstances[i] = fd_return;
 
 				HAL_UART_Receive_DMA(fd_return->uart, gTemp_Message_Receive, 1);
+				break;
 			}
 		}
 		if (i >= MAX_UART_INSTANCES)

@@ -17,11 +17,13 @@
  */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "main.h"
 
+#include <stdlib.h>
+#include <string.h>
 #include <stdbool.h>
 #include <limits.h>
 
@@ -78,7 +80,8 @@ enum
 	ERROR_NTC_DISSIPATOR,
 } eErros;
 
-FD_t* FullDuplexSystem;
+FD_t *FullDuplexSystem;
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -282,6 +285,12 @@ int main(void)
 	config.uart = &huart2;
 
 	FullDuplexSystem = FDUSART_Init(&config);
+	uint8_t *Buf = (uint8_t *) malloc(config.size_buffer * sizeof(uint8_t));
+	if (Buf != NULL) {  // Sempre verifique se a alocação foi bem-sucedida
+	    memset(Buf, 0, config.size_buffer); // Inicializa a variavel com valor 0
+	} else {
+	    // Tratamento de erro para falha de alocação de memória
+	}
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -345,6 +354,11 @@ int main(void)
 		__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 16000);
 		__HAL_TIM_SET_COMPARE(&htim15, TIM_CHANNEL_1, 16000);
 
+		uint8_t Cmd;
+
+		size_t Len;
+		FDUSART_Receive_Message(FullDuplexSystem, &Cmd, Buf, &Len);
+todo verificar a função FDUSART_Receive_Message
 	}
 	/* USER CODE END 3 */
 }
@@ -1141,7 +1155,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		InterruptControl_MAX31855();
 		SetError(); /* Verify if exist error */
-		StatusLEDControl(sStatusPower.Flags.Error);
+		StatusLEDControl((uint8_t) sStatusPower.Flags.Error);
+
 		if (Cnt1ms > USHRT_MAX - 1)
 			Cnt1ms = 0;
 		else
@@ -1298,7 +1313,7 @@ static void StatusLEDControl(uint8_t ErrorCode)
 {
 	CntStatusLED++;
 
-	if (ErrorCode == ERROR_NONE)
+	if (ErrorCode == (uint8_t) ERROR_NONE)
 	{
 		if (CntStatusLED >= PERIOD_LED)
 		{
@@ -1308,11 +1323,11 @@ static void StatusLEDControl(uint8_t ErrorCode)
 	}
 	else
 	{
-		if (CntStatusLED <= PERIOD_LED_ERROR && CntStatusLEDError < ErrorCode - 1)
+		if (CntStatusLED <= PERIOD_LED_ERROR && CntStatusLEDError < (uint8_t) ErrorCode)
 		{
 			HAL_GPIO_WritePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin, GPIO_PIN_SET);
 		}
-		else if (CntStatusLEDError < ErrorCode - 1)
+		else if (CntStatusLEDError < (uint8_t) ErrorCode)
 		{
 			HAL_GPIO_WritePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin, GPIO_PIN_RESET);
 
