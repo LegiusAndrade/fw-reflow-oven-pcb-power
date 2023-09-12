@@ -242,6 +242,44 @@ void _FDUSART_ResetReceiving(size_t index)
 	gInstances_Receiving[index].Flags.bits.rx_receiving = false;
 	gInstances_Receiving[index].cnt_byte_received = 0;
 }
+
+size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
+{
+	uint16_t line_free_id = 0;
+	size_t success = false;
+
+	/* All lines occupied */
+	if (!_FDUSART_SearchLineFree(FDInstance, &line_free_id))
+	{
+		_FDUSART_SetFlagFullBuf(FDInstance, true);
+		return success;
+	}
+
+	/* Len outside the maximum size */
+	if (Len > FDInstance->size_buffer || Len > FDUSART_SIZE_MAX_MESSAGE)
+	{
+		return success;
+	}
+
+	_FDUSART_ClearLine(FDInstance, line_free_id);
+
+	memcpy(&FDInstance->link[line_free_id].buffer_line[0], Buf, (Len + SIZE_HEADER - 2)); //-2 of CRC
+
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER -2); //Calculate CRC based into message and header
+
+	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
+	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
+
+	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
+
+	FDInstance->link[line_free_id].type_message = MESSAGE_ACK;
+
+	_FDUSART_MakeToSend(FDInstance, line_free_id);
+
+	success = true;
+
+	return success;
+}
 /********************************************************************************
  ******* FUNCTIONS
  *******************************************************************************/
@@ -258,6 +296,8 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 
 	if (fd_return != NULL)
 	{
+		memset(fd_return, 0, sizeof(FD_t));  // Limpa a memória alocada.
+
 		fd_return->flags.all_flags = 0;
 		fd_return->flags.bits.initialized = true;
 		fd_return->uart = config->uart;
@@ -279,6 +319,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 					success = false;
 					break;
 				}
+				memset(fd_return->link[i].buffer_line, 0, fd_return->size_buffer + SIZE_HEADER);
 			}
 			success = true;
 		}
@@ -317,6 +358,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 			FDUSART_DeInit(&fd_return);
 			success = false;
 		}
+
 	}
 	return fd_return;
 }
@@ -539,7 +581,7 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	size_t success = false;
 
 	/* All lines occupied */
-	if (_FDUSART_SearchLineFree(FDInstance, &line_free_id))
+	if (!_FDUSART_SearchLineFree(FDInstance, &line_free_id))
 	{
 		_FDUSART_SetFlagFullBuf(FDInstance, true);
 		return success;
@@ -575,10 +617,10 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	FDInstance->link[line_free_id].buffer_line[8] = (uint8_t) (Len & 0x00FF);
 	memcpy(&FDInstance->link[line_free_id].buffer_line[9], Buf, Len);
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER); //Calculate CRC based into message and header
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER-2); //Calculate CRC based into message and header
 
-	FDInstance->link[line_free_id].buffer_line[Len + 9] = (uint8_t) (crc & 0xFF00) >> 8;
-	FDInstance->link[line_free_id].buffer_line[Len + 10] = (uint8_t) (crc & 0x00FF);
+	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
+	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
 
 	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
 
@@ -590,6 +632,8 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 
 	return success;
 }
+
+
 
 size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
@@ -610,8 +654,8 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		return success;
 	}
 
-	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read;
-	while (index_message_for_read > 0)
+	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read - 1;
+	while (index_message_for_read > -1)
 	{ //If exists message for read
 
 		// Extract message details: sequence number, command, and size.
@@ -625,7 +669,9 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		if (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] == MESSAGE_SEND)
 		{
 			gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] = MESSAGE_ACK;
-			FDUSART_SendMessage((void*) gInstances[search_instance], *Cmd, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
+			//FDUSART_SendMessage((void*) gInstances[search_instance], *Cmd, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
+			_FDUSART_SendACK((void*) gInstances[search_instance],(void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len);
+
 		}
 		else
 		{ // If the message is just an ACK, delete the message and subtract it from the message counter
@@ -636,9 +682,10 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		}
 
 		// Validate CRC
-		uint16_t received_crc = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + 9] << 8)
-				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + 10];
-		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len + SIZE_HEADER);
+		Todo calculo de CRC errado
+		uint16_t received_crc = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 2] << 8)
+				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
+		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len + SIZE_HEADER -2);
 
 		if (received_crc != calculated_crc)
 		{

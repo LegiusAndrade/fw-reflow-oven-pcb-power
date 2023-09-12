@@ -285,11 +285,14 @@ int main(void)
 	config.uart = &huart2;
 
 	FullDuplexSystem = FDUSART_Init(&config);
-	uint8_t *Buf = (uint8_t *) malloc(config.size_buffer * sizeof(uint8_t));
-	if (Buf != NULL) {  // Sempre verifique se a alocação foi bem-sucedida
-	    memset(Buf, 0, config.size_buffer); // Inicializa a variavel com valor 0
-	} else {
-	    // Tratamento de erro para falha de alocação de memória
+	uint8_t *Buf = (uint8_t*) malloc(config.size_buffer * sizeof(uint8_t));
+	if (Buf != NULL)
+	{  // Sempre verifique se a alocação foi bem-sucedida
+		memset(Buf, 0, config.size_buffer); // Inicializa a variavel com valor 0
+	}
+	else
+	{
+		// Tratamento de erro para falha de alocação de memória
 	}
 	/* USER CODE END 2 */
 
@@ -300,7 +303,7 @@ int main(void)
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		int8_t i = 0;
+		size_t i = 0;
 		uint32_t u32Temp = 0;
 		if (sStatusPower.Flags.CalculatePD)
 		{
@@ -358,7 +361,7 @@ int main(void)
 
 		size_t Len;
 		FDUSART_Receive_Message(FullDuplexSystem, &Cmd, Buf, &Len);
-todo verificar a função FDUSART_Receive_Message
+
 	}
 	/* USER CODE END 3 */
 }
