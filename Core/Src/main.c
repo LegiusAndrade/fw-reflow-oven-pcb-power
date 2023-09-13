@@ -286,6 +286,8 @@ int main(void)
 	config.uart = &huart2;
 
 	FullDuplexSystem = FDUSART_Init(&config);
+
+
 	uint8_t *Buf = (uint8_t*) malloc(config.size_buffer * sizeof(uint8_t));
 	if (Buf != NULL)
 	{  // Sempre verifique se a alocação foi bem-sucedida
@@ -1171,6 +1173,11 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			Cnt1ms = 0;
 		else
 			Cnt1ms++;
+
+		if(Cnt1ms % 1000 == 0)
+		{
+			FDUSART_SendMessage(FullDuplexSystem, 0x01, 0x01, 1);
+		}
 
 		/* Power on relay inrush */
 		if (CntRelayInrush >= RELAY_INRUSH)
