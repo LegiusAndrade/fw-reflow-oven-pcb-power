@@ -211,7 +211,8 @@ size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 
 bool _FDUSART_CheckHeader(size_t index)
 {
-	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8) && gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
+	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
+			&& gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
 	{
 		return true;
 	}
@@ -229,7 +230,8 @@ bool _FDUSART_CheckProtocolVersion(size_t index)
 
 bool _FDUSART_CheckSizeMessage(size_t index)
 {
-	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[7] << 8) | gInstances_Receiving[index].buffer_received[8]);
+	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[7] << 8)
+			| gInstances_Receiving[index].buffer_received[8]);
 	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - SIZE_HEADER))
 	{
 		return true;
@@ -464,7 +466,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			gInstances_Receiving[i].cnt_messages_for_read = 0;
 			index_free = 0;
 		}
-		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received, gInstances_Receiving[i].size_message + SIZE_HEADER);
+		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received,
+				gInstances_Receiving[i].size_message + SIZE_HEADER);
 		_FDUSART_ResetReceiving(i);
 	}
 
@@ -533,16 +536,28 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 }
 
-void USARTx_IRQHandler(void)
+/*void USART2_IRQHandler(void)
 {
-	https://community.st.com/t5/stm32-mcus-embedded-software/hal-uart-transmit-dma-issues/td-p/443614/page/2
-	HAL_UART_IRQHandler((void*) gInstances[0]->link);
-}
+	//https://community.st.com/t5/stm32-mcus-embedded-software/hal-uart-transmit-dma-issues/td-p/443614/page/2
+	size_t i;
+	FD_t *instance;
 
-size_t FDUSART_InterruptControl(FD_t *FDInstance)
+	// Transmission
+	for (i = 0; i < MAX_UART_INSTANCES; i++)
+	{
+		instance = (void*) gInstances[i];
+		if (instance != NULL)
+		{
+			HAL_UART_IRQHandler((void*) gInstances[i]->link);
+		}
+	}
+
+}*/
+
+size_t FDUSART_InterruptControl()
 {
 	size_t success = false;
-	FD_t *instance = FDInstance;
+	FD_t *instance;
 	size_t i;
 
 	// Transmission
@@ -684,14 +699,16 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][5];
 
 		*Cmd = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][6];
-		*Len = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][7] << 8) | gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][8];
+		*Len = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][7] << 8)
+				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][8];
 
 		//If new message, send ACK
 		if (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] == MESSAGE_SEND)
 		{
 
 			//FDUSART_SendMessage((void*) gInstances[search_instance], *Cmd, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
-			_FDUSART_SendACK((void*) gInstances[search_instance], (void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len);
+			_FDUSART_SendACK((void*) gInstances[search_instance], (void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read],
+					*Len);
 
 		}
 		else
@@ -703,9 +720,10 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		}
 
 		// Validate CRC
-		uint16_t received_crc = (uint16_t) ((int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 2] << 8)
-				| (int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
-		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len + SIZE_HEADER - 2);
+		uint16_t received_crc = (uint16_t) ((int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER
+				- 2] << 8) | (int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
+		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read],
+				*Len + SIZE_HEADER - 2);
 
 		if (received_crc != calculated_crc)
 		{
