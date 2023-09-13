@@ -17,3 +17,4 @@
 ../Core/Src/stm32g4xx_it.c:310:6:EXTI15_10_IRQHandler	8	static
 ../Core/Src/stm32g4xx_it.c:324:6:DMA2_Channel1_IRQHandler	8	static
 ../Core/Src/stm32g4xx_it.c:338:6:DMA2_Channel2_IRQHandler	8	static
+../Core/Src/stm32g4xx_it.c:352:6:DMAMUX_OVR_IRQHandler	4	static

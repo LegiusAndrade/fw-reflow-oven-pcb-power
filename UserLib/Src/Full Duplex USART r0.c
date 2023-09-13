@@ -53,7 +53,7 @@
 
 typedef enum
 {
-	LINE_FREE = 0, LINE_READY_FOR_SEND, LINE_SENT,
+	LINE_FREE = 0, LINE_READY_FOR_SEND, LINE_SENT_DMA, LINE_SENT_EXTRNAL
 } LINE_STATE_t;
 
 typedef enum
@@ -77,7 +77,6 @@ typedef union
 typedef struct
 {
 	LINE_STATE_t line_state;
-	TYPE_MESSAGE_t type_message;
 	uint8_t *buffer_line;
 	uint8_t time_retransmit;
 	uint8_t error_timeout_cnt;
@@ -204,6 +203,7 @@ size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 
 	HAL_UART_Transmit_DMA(FDInstance->uart, FDInstance->link[line].buffer_line, FDInstance->link[line].message_length);
 	FDInstance->flags.bits.send_message = true;
+	FDInstance->link[line].line_state = LINE_SENT_DMA;
 
 	success = true;
 	return success;
@@ -265,14 +265,14 @@ size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 
 	memcpy(&FDInstance->link[line_free_id].buffer_line[0], Buf, (Len + SIZE_HEADER - 2)); //-2 of CRC
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER -2); //Calculate CRC based into message and header
+	FDInstance->link[line_free_id].buffer_line[3] = MESSAGE_ACK;
+
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER - 2); //Calculate CRC based into message and header
 
 	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
 	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
 
 	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
-
-	FDInstance->link[line_free_id].type_message = MESSAGE_ACK;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -492,26 +492,51 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 		return;
 	}
 
-	uint16_t sequence_number_sent = huart->pTxBuffPtr[4] << 8 | huart->pTxBuffPtr[5];
-	uint16_t sequence_number_index = 0;
+//	uint16_t sequence_number_sent = huart->pTxBuffPtr[4] << 8 | huart->pTxBuffPtr[5];
+//	uint16_t sequence_number_index = 0;
+//
+//	for (j = 0; j < FDUSART_BUFFER_LINES; j++)
+//	{
+//		sequence_number_index = instance->link[j].buffer_line[4] << 8 | instance->link[j].buffer_line[5];
+//		if (sequence_number_sent == sequence_number_index)
+//		{
+//			// Found line sent
+//			break;
+//		}
+//	}
+//
+//	if (j >= FDUSART_BUFFER_LINES)
+//	{
+////All lines used
+//		return;
+//	}
 
 	for (j = 0; j < FDUSART_BUFFER_LINES; j++)
 	{
-		sequence_number_index = instance->link[j].buffer_line[4] << 8 | instance->link[j].buffer_line[5];
-		if (sequence_number_sent == sequence_number_index)
+		if (instance->link[j].line_state == LINE_SENT_DMA)
 		{
-			// Found line sent
+			//			Found line sent
 			break;
 		}
 	}
 
-	if (j >= FDUSART_BUFFER_LINES)
-	{
-//All lines used
-		return;
-	}
-	instance->link[j].line_state = LINE_SENT;
+	instance->flags.bits.send_message = false;
 
+	if (instance->link[j].buffer_line[3] == MESSAGE_ACK)
+	{ //If response with ACK no wait
+		_FDUSART_ClearLine(instance, j);
+	}
+	else
+	{
+		instance->link[j].line_state = LINE_SENT_EXTRNAL;
+	}
+
+}
+
+void USARTx_IRQHandler(void)
+{
+	https://community.st.com/t5/stm32-mcus-embedded-software/hal-uart-transmit-dma-issues/td-p/443614/page/2
+	HAL_UART_IRQHandler((void*) gInstances[0]->link);
 }
 
 size_t FDUSART_InterruptControl(FD_t *FDInstance)
@@ -539,7 +564,7 @@ size_t FDUSART_InterruptControl(FD_t *FDInstance)
 					}
 				}
 
-				if (instance->link[line].line_state == LINE_SENT)
+				if (instance->link[line].line_state == LINE_SENT_EXTRNAL || instance->link[line].line_state == LINE_SENT_DMA)
 				{ // If message sent and not received response
 					instance->link[line].time_retransmit--; //Decrement time for retransmit
 					if (instance->link[line].time_retransmit == 0)
@@ -559,7 +584,7 @@ size_t FDUSART_InterruptControl(FD_t *FDInstance)
 		}
 	}
 
-	//Reception
+	// Reception
 	for (i = 0; i < MAX_UART_INSTANCES; i++)
 	{
 		if (gInstances_Receiving[i].Flags.bits.rx_receiving == true)
@@ -609,7 +634,7 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	FDInstance->link[line_free_id].buffer_line[0] = (uint8_t) (MESSAGE_ID_SEND & 0xFF00) >> 8; // Lines writted with MESSAGE_ID
 	FDInstance->link[line_free_id].buffer_line[1] = (uint8_t) (MESSAGE_ID_SEND & 0x00FF);
 	FDInstance->link[line_free_id].buffer_line[2] = PROTOCOL_VERSION;
-	FDInstance->link[line_free_id].buffer_line[3] = FDInstance->link[line_free_id].type_message;
+	FDInstance->link[line_free_id].buffer_line[3] = MESSAGE_SEND;
 	FDInstance->link[line_free_id].buffer_line[4] = (FDInstance->sequence_number & 0xFF00) >> 8;
 	FDInstance->link[line_free_id].buffer_line[5] = (FDInstance->sequence_number & 0x00FF);
 	FDInstance->link[line_free_id].buffer_line[6] = Cmd;
@@ -617,14 +642,12 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	FDInstance->link[line_free_id].buffer_line[8] = (uint8_t) (Len & 0x00FF);
 	memcpy(&FDInstance->link[line_free_id].buffer_line[9], Buf, Len);
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER-2); //Calculate CRC based into message and header
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER - 2); //Calculate CRC based into message and header
 
 	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
 	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
 
 	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
-
-	FDInstance->link[line_free_id].type_message = MESSAGE_SEND;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -632,8 +655,6 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 
 	return success;
 }
-
-
 
 size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
@@ -668,9 +689,9 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		//If new message, send ACK
 		if (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] == MESSAGE_SEND)
 		{
-			gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] = MESSAGE_ACK;
+
 			//FDUSART_SendMessage((void*) gInstances[search_instance], *Cmd, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
-			_FDUSART_SendACK((void*) gInstances[search_instance],(void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len);
+			_FDUSART_SendACK((void*) gInstances[search_instance], (void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len);
 
 		}
 		else
@@ -682,10 +703,9 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 		}
 
 		// Validate CRC
-		Todo calculo de CRC errado
-		uint16_t received_crc = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 2] << 8)
-				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
-		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len + SIZE_HEADER -2);
+		uint16_t received_crc = (uint16_t) ((int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 2] << 8)
+				| (int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
+		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read], *Len + SIZE_HEADER - 2);
 
 		if (received_crc != calculated_crc)
 		{
