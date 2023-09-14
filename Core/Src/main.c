@@ -285,6 +285,8 @@ int main(void)
 	config.size_buffer = 50;
 	config.uart = &huart2;
 
+	HAL_GPIO_WritePin(USART_RX_TX_GPIO_Port, USART_RX_TX_Pin, HIGH);
+
 	FullDuplexSystem = FDUSART_Init(&config);
 
 

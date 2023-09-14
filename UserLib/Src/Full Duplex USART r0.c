@@ -646,14 +646,14 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	_FDUSART_ClearLine(FDInstance, line_free_id);
 
 // ID | VERSION | TYPE MESSAGE | SEQUENCE NUMBER | MESSAGE COMMAND | SIZE MESSAGE | MESSAGE | CRC
-	FDInstance->link[line_free_id].buffer_line[0] = (uint8_t) (MESSAGE_ID_SEND & 0xFF00) >> 8; // Lines writted with MESSAGE_ID
+	FDInstance->link[line_free_id].buffer_line[0] = MESSAGE_ID_SEND >> 8; // Lines writted with MESSAGE_ID
 	FDInstance->link[line_free_id].buffer_line[1] = (uint8_t) (MESSAGE_ID_SEND & 0x00FF);
 	FDInstance->link[line_free_id].buffer_line[2] = PROTOCOL_VERSION;
 	FDInstance->link[line_free_id].buffer_line[3] = MESSAGE_SEND;
 	FDInstance->link[line_free_id].buffer_line[4] = (FDInstance->sequence_number & 0xFF00) >> 8;
 	FDInstance->link[line_free_id].buffer_line[5] = (FDInstance->sequence_number & 0x00FF);
 	FDInstance->link[line_free_id].buffer_line[6] = Cmd;
-	FDInstance->link[line_free_id].buffer_line[7] = (uint8_t) (Len & 0xFF00) >> 8;
+	FDInstance->link[line_free_id].buffer_line[7] = Len >> 8;
 	FDInstance->link[line_free_id].buffer_line[8] = (uint8_t) (Len & 0x00FF);
 	memcpy(&FDInstance->link[line_free_id].buffer_line[9], Buf, Len);
 
