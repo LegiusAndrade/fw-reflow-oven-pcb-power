@@ -49,7 +49,9 @@
 
 #define MESSAGE_ID_SEND							0xBEBE		// Protocol init message for send
 #define PROTOCOL_VERSION						100			// Protocol version: 1.00
-#define SIZE_HEADER								11			// 2Bytes (ID) 	 + 1Byte (VERSION) + 1 Byte (TYPE MESSAGE) + 2Bytes (SEQUENCE NUMBER) + 1Byte (COMMAND MESSAGE) + 1Byte (SIZE MESSAGE) + 2Bytes (CRC)
+#define //SIZE_HEADER								11			// 2Bytes (ID) 	 + 1Byte (VERSION) + 1 Byte (TYPE MESSAGE) + 2Bytes (SEQUENCE NUMBER) + 1Byte (COMMAND MESSAGE) + 1Byte (SIZE MESSAGE) + 2Bytes (CRC)
+
+#define PACK_STRUCT 							__attribute__((__packed__))
 
 typedef enum
 {
@@ -74,10 +76,25 @@ typedef union
 	uint16_t all_flags;
 } FD_FLAGS_t;
 
+typedef union PACK_STRUCT
+{
+	uint8_t *data;
+	struct PACK_STRUCT
+	{
+		uint16_t header;
+		uint16_t version :10;
+		uint8_t type_message :2;
+		uint16_t sequence_number;
+		uint8_t cmd;
+		uint16_t len :10;
+		uint16_t crc16;
+	} fields;
+} FD_MSG_t;
+
 typedef struct
 {
 	LINE_STATE_t line_state;
-	uint8_t *buffer_line;
+	FD_MSG_t *buffer_line;
 	uint8_t time_retransmit;
 	uint8_t error_timeout_cnt;
 	size_t message_length;
@@ -290,7 +307,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 {
 	assert(config != NULL);
 
-	size_t success = false;
+	bool success = false;
 
 	FD_t *fd_return;
 
@@ -304,26 +321,26 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 		fd_return->flags.bits.initialized = true;
 		fd_return->uart = config->uart;
 
-		if (config->size_buffer > FDUSART_SIZE_MAX_MESSAGE)
-		{
-			success = false;
-		}
-		else
+		if (config->size_buffer <= FDUSART_SIZE_MAX_MESSAGE)
 		{
 			fd_return->size_buffer = config->size_buffer;
 			// Allocated dinamic memeory
 			for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
 			{
-				fd_return->link[i].buffer_line = (uint8_t*) malloc(fd_return->size_buffer + SIZE_HEADER);
+				fd_return->link[i].buffer_line = (FD_MSG_t*) malloc(fd_return->size_buffer + SIZE_HEADER);
 				if (fd_return->link[i].buffer_line == NULL)
 				{
-					// Fail alocated memeory
+					// Free previously allocated memory
+					for (size_t j = 0; j < i; j++)
+					{
+						free(fd_return->link[j].buffer_line);
+					}
 					success = false;
 					break;
 				}
 				memset(fd_return->link[i].buffer_line, 0, fd_return->size_buffer + SIZE_HEADER);
+				success = true;
 			}
-			success = true;
 		}
 
 	}
@@ -370,6 +387,7 @@ void FDUSART_DeInit(FD_t **fd)
 	assert(*fd != NULL);
 
 	size_t i = 0;
+
 	for (i = 0; i < MAX_UART_INSTANCES; i++)
 	{
 		if (gInstances[i] && gInstances[i]->uart->Instance == (*fd)->uart->Instance)
@@ -379,7 +397,7 @@ void FDUSART_DeInit(FD_t **fd)
 		}
 	}
 
-	for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
+	for (i = 0; i < FDUSART_BUFFER_LINES; i++)
 	{
 		if ((*fd)->link[i].buffer_line != NULL)
 		{
@@ -537,22 +555,22 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 }
 
 /*void USART2_IRQHandler(void)
-{
-	//https://community.st.com/t5/stm32-mcus-embedded-software/hal-uart-transmit-dma-issues/td-p/443614/page/2
-	size_t i;
-	FD_t *instance;
+ {
+ //https://community.st.com/t5/stm32-mcus-embedded-software/hal-uart-transmit-dma-issues/td-p/443614/page/2
+ size_t i;
+ FD_t *instance;
 
-	// Transmission
-	for (i = 0; i < MAX_UART_INSTANCES; i++)
-	{
-		instance = (void*) gInstances[i];
-		if (instance != NULL)
-		{
-			HAL_UART_IRQHandler((void*) gInstances[i]->link);
-		}
-	}
+ // Transmission
+ for (i = 0; i < MAX_UART_INSTANCES; i++)
+ {
+ instance = (void*) gInstances[i];
+ if (instance != NULL)
+ {
+ HAL_UART_IRQHandler((void*) gInstances[i]->link);
+ }
+ }
 
-}*/
+ }*/
 
 size_t FDUSART_InterruptControl()
 {
@@ -615,10 +633,13 @@ size_t FDUSART_InterruptControl()
 
 }
 
-size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len)
+bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len)
 {
 	uint16_t line_free_id = 0;
-	size_t success = false;
+	bool success = false;
+
+	if (!FDInstance || !Buf) // Verifica ponteiros nulos
+		return success;
 
 	/* All lines occupied */
 	if (!_FDUSART_SearchLineFree(FDInstance, &line_free_id))
@@ -634,35 +655,30 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	}
 
 	/* Sequence number value */
-	if (FDInstance->sequence_number == UINT16_MAX)
-	{
-		FDInstance->sequence_number = 1;
-	}
-	else
-	{
-		FDInstance->sequence_number++;
-	}
+	FDInstance->sequence_number = FDInstance->sequence_number >= UINT16_MAX ? 1 : FDInstance->sequence_number + 1;
 
 	_FDUSART_ClearLine(FDInstance, line_free_id);
 
-// ID | VERSION | TYPE MESSAGE | SEQUENCE NUMBER | MESSAGE COMMAND | SIZE MESSAGE | MESSAGE | CRC
-	FDInstance->link[line_free_id].buffer_line[0] = MESSAGE_ID_SEND >> 8; // Lines writted with MESSAGE_ID
-	FDInstance->link[line_free_id].buffer_line[1] = (uint8_t) (MESSAGE_ID_SEND & 0x00FF);
-	FDInstance->link[line_free_id].buffer_line[2] = PROTOCOL_VERSION;
-	FDInstance->link[line_free_id].buffer_line[3] = MESSAGE_SEND;
-	FDInstance->link[line_free_id].buffer_line[4] = (FDInstance->sequence_number & 0xFF00) >> 8;
-	FDInstance->link[line_free_id].buffer_line[5] = (FDInstance->sequence_number & 0x00FF);
-	FDInstance->link[line_free_id].buffer_line[6] = Cmd;
-	FDInstance->link[line_free_id].buffer_line[7] = Len >> 8;
-	FDInstance->link[line_free_id].buffer_line[8] = (uint8_t) (Len & 0x00FF);
-	memcpy(&FDInstance->link[line_free_id].buffer_line[9], Buf, Len);
+	// ID | VERSION | TYPE MESSAGE | SEQUENCE NUMBER | MESSAGE COMMAND | SIZE MESSAGE | MESSAGE | CRC
+	FDInstance->link[line_free_id].buffer_line->fields.header = MESSAGE_ID_SEND;
+	FDInstance->link[line_free_id].buffer_line->fields.version = PROTOCOL_VERSION;
+	FDInstance->link[line_free_id].buffer_line->fields.type_message = MESSAGE_SEND;
+	FDInstance->link[line_free_id].buffer_line->fields.sequence_number = FDInstance->sequence_number;
+	FDInstance->link[line_free_id].buffer_line->fields.cmd = Cmd;
+	FDInstance->link[line_free_id].buffer_line->fields.len = Len;
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER - 2); //Calculate CRC based into message and header
+	/* offsetof(FD_MSG_t, fields.len) retorna o deslocamento do membro len dentro da estrutura.
+	 sizeof(FDInstance->link[line_free_id].buffer_line->fields.len) retorna o tamanho do campo len, então o ponteiro se move para o byte após o len.
+	 O resultado é o endereço inicial onde você quer copiar sua mensagem. */
 
-	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
-	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
+	uint8_t *messageStart = (uint8_t*) FDInstance->link[line_free_id].buffer_line + offsetof(FD_MSG_t, fields.len)
+			+ sizeof(FDInstance->link[line_free_id].buffer_line->fields.len);
+	memcpy(messageStart, Buf, Len);
 
-	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
+	uint16_t crc = CRC16_CCITT_Calculate(&(FDInstance->link[line_free_id].buffer_line->data), offsetof(FD_MSG_t, fields.crc16)); //Calculate CRC based into message and header
+	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
+
+	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -671,11 +687,15 @@ size_t FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t L
 	return success;
 }
 
-size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
+bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
 
-	size_t success = false;
+	bool success = false;
 	size_t search_instance;
+
+	// Check null pointers and valid input
+	if (!FDInstance || !Cmd || !Buf || !Len)
+		return success;
 
 	for (search_instance = 0; search_instance < MAX_UART_INSTANCES; search_instance++)
 	{
@@ -693,6 +713,8 @@ size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, siz
 	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read - 1;
 	while (index_message_for_read > -1)
 	{ //If exists message for read
+
+		uint8_t* currentMessage = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
 
 		// Extract message details: sequence number, command, and size.
 		uint16_t sequence_number = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][4] << 8)
