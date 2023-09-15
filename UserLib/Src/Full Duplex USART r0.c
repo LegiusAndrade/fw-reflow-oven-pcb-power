@@ -149,16 +149,25 @@ uint8_t gTemp_Message_Receive[FDUSART_SIZE_MAX_MESSAGE] =
 /********************************************************************************
  ******* PROTOTYPE PRIVATE FUNCTIONS
  *******************************************************************************/
-size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree);
-size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine);
-void _FDUSART_MakeToSend(FD_t *FDInstance, uint16_t NumberLine);
-void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value);
-size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line);
+static size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree);
+static size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine);
+static int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t SequenceNumber);
+static void _FDUSART_MakeToSend(FD_t *FDInstance, uint16_t NumberLine);
+static void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value);
+static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line);
+static bool _FDUSART_CheckHeader(size_t index);
+static bool _FDUSART_CheckProtocolVersion(size_t index);
+static bool _FDUSART_CheckSizeMessage(size_t index);
+static void _FDUSART_ResetReceiving(size_t index);
+static bool _FDUSART_HandleMessageOrACK(FD_t *FDInstance, size_t search_instance, int16_t index_message_for_read);
+static size_t _FDUSART_SearchUARTInstance(FD_t *FDInstance);
+static bool _FDUSART_ExtractMessageDetails(FD_MSG_t *message, uint8_t *cmd, size_t *len, size_t *sequence_number);
+static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len);
 
 /********************************************************************************
  ******* PRIVATE FUNCTIONS
  *******************************************************************************/
-size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
+static size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
 {
 	size_t success = false;
 	uint16_t line_free_id = 0;
@@ -174,7 +183,7 @@ size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
 	return success;
 }
 
-size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
+static size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
 {
 	size_t success = false;
 
@@ -187,7 +196,7 @@ size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
 	return success;
 }
 
-int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t SequenceNumber)
+static int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t SequenceNumber)
 {
 	int16_t index_with_sequence_number = -1;
 
@@ -203,18 +212,18 @@ int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t SequenceNu
 	return index_with_sequence_number;
 }
 
-void _FDUSART_MakeToSend(FD_t *FDInstance, uint16_t NumberLine)
+static void _FDUSART_MakeToSend(FD_t *FDInstance, uint16_t NumberLine)
 {
 	FDInstance->link[NumberLine].line_state = LINE_READY_FOR_SEND;
 	FDInstance->link[NumberLine].time_retransmit = FDUSART_TIME_RETRANSMIT_IF_NORESPONSE;
 }
 
-void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value)
+static void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value)
 {
 	FDInstance->flags.bits.full_buf = (flag_value & 0x01);
 }
 
-size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
+static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 {
 	size_t success = false;
 
@@ -226,7 +235,7 @@ size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 	return success;
 }
 
-bool _FDUSART_CheckHeader(size_t index)
+static bool _FDUSART_CheckHeader(size_t index)
 {
 	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
 			&& gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
@@ -236,7 +245,7 @@ bool _FDUSART_CheckHeader(size_t index)
 	return false;
 }
 
-bool _FDUSART_CheckProtocolVersion(size_t index)
+static bool _FDUSART_CheckProtocolVersion(size_t index)
 {
 	if (gInstances_Receiving[index].buffer_received[2] == PROTOCOL_VERSION)
 	{
@@ -245,7 +254,7 @@ bool _FDUSART_CheckProtocolVersion(size_t index)
 	return false;
 }
 
-bool _FDUSART_CheckSizeMessage(size_t index)
+static bool _FDUSART_CheckSizeMessage(size_t index)
 {
 	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[7] << 8)
 			| gInstances_Receiving[index].buffer_received[8]);
@@ -256,13 +265,13 @@ bool _FDUSART_CheckSizeMessage(size_t index)
 	return false;
 }
 
-void _FDUSART_ResetReceiving(size_t index)
+static void _FDUSART_ResetReceiving(size_t index)
 {
 	gInstances_Receiving[index].Flags.bits.rx_receiving = false;
 	gInstances_Receiving[index].cnt_byte_received = 0;
 }
 
-size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
+static size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 {
 	uint16_t line_free_id = 0;
 	size_t success = false;
@@ -299,6 +308,58 @@ size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 
 	return success;
 }
+
+static size_t _FDUSART_SearchUARTInstance(FD_t *FDInstance)
+{
+	size_t search_instance;
+	for (search_instance = 0; search_instance < MAX_UART_INSTANCES; search_instance++)
+	{
+		if (gInstances[search_instance]->uart->Instance == FDInstance->uart->Instance)
+			break;
+	}
+	return search_instance;
+}
+
+static bool _FDUSART_ExtractMessageDetails(FD_MSG_t *message, uint8_t *cmd, size_t *len, size_t *sequence_number)
+{
+	if (!message || !cmd || !len)
+		return false;
+
+	*cmd = message->fields.cmd;
+	*len = message->fields.len;
+	*sequence_number = message->fields.sequence_number;
+	return true;
+}
+
+static bool _FDUSART_HandleMessageOrACK(FD_t *FDInstance, size_t search_instance, int16_t index_message_for_read)
+{
+	FD_MSG_t *currentMessageStruct = (FD_MSG_t*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
+
+	if (currentMessageStruct->fields.type_message == MESSAGE_SEND)
+	{
+		_FDUSART_SendACK(gInstances[search_instance], currentMessageStruct->data);
+	}
+	else
+	{
+		int16_t index_sequence_number = _FDUSART_SearchIndexSequenceNumber(FDInstance, currentMessageStruct->fields.sequence_number);
+		_FDUSART_ClearLine(FDInstance, index_sequence_number);
+		return false;
+	}
+	return true;
+}
+
+static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len)
+{
+	if (!message)
+		return false;
+
+	uint16_t received_crc = message->fields.crc16;
+
+	uint16_t calculated_crc = CRC16_CCITT_Calculate(message->data, len + offsetof(FD_MSG_t, fields.crc16));
+
+	return received_crc == calculated_crc;
+}
+
 /********************************************************************************
  ******* FUNCTIONS
  *******************************************************************************/
@@ -689,6 +750,54 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 
 bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
+	bool success = false;
+
+	if (!FDInstance || !Cmd || !Buf || !Len)
+		return false;
+
+	size_t search_instance = _FDUSART_SearchUARTInstance(FDInstance);
+
+	if (search_instance >= MAX_UART_INSTANCES)
+		return false;
+
+	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read - 1;
+	while (index_message_for_read > -1)
+	{
+		FD_MSG_t *currentMessage = (FD_MSG_t*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
+
+		uint16_t sequence_number = 0;
+
+		if (!_FDUSART_ExtractMessageDetails(currentMessage, &sequence_number, Cmd, Len, &sequence_number))
+		{
+			index_message_for_read--;
+			continue;
+		}
+
+		if (!_FDUSART_HandleMessageOrACK(FDInstance, search_instance, &index_message_for_read, sequence_number))
+		{
+			index_message_for_read--;
+			continue;
+		}
+
+		if (!_FDUSART_ValidateMessageCRC(currentMessage, *Len))
+		{
+			index_message_for_read--;
+			continue;
+		}
+
+        uint8_t* messageStart = currentMessage->data + offsetof(FD_MSG_t, fields.crc16) + sizeof(currentMessage->fields.crc16);
+        memcpy(Buf, messageStart, *Len);
+
+        gInstances_Receiving[search_instance].cnt_messages_for_read--;
+
+		return true;
+
+	}
+	return false;
+}
+
+bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
+{
 
 	bool success = false;
 	size_t search_instance;
@@ -714,7 +823,7 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 	while (index_message_for_read > -1)
 	{ //If exists message for read
 
-		uint8_t* currentMessage = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
+		uint8_t *currentMessage = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
 
 		// Extract message details: sequence number, command, and size.
 		uint16_t sequence_number = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][4] << 8)
