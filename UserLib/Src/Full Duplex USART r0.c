@@ -49,7 +49,18 @@
 
 #define MESSAGE_ID_SEND							0xBEBE		// Protocol init message for send
 #define PROTOCOL_VERSION						100			// Protocol version: 1.00
-#define //SIZE_HEADER								11			// 2Bytes (ID) 	 + 1Byte (VERSION) + 1 Byte (TYPE MESSAGE) + 2Bytes (SEQUENCE NUMBER) + 1Byte (COMMAND MESSAGE) + 1Byte (SIZE MESSAGE) + 2Bytes (CRC)
+//#define SIZE_HEADER								11			// 2Bytes (ID) 	 + 1Byte (VERSION) + 1 Byte (TYPE MESSAGE) + 2Bytes (SEQUENCE NUMBER) + 1Byte (COMMAND MESSAGE) + 1Byte (SIZE MESSAGE) + 2Bytes (CRC)
+
+#define HEADER_OFFSET (offsetof(FD_MSG_t, fields.header))
+#define HEADER_SIZE (sizeof(((FD_MSG_t *)0)->fields.header))
+
+#define VERSION_OFFSET (offsetof(FD_MSG_t, fields.version))
+#define VERSION_SIZE (sizeof(((FD_MSG_t *)0)->fields.version))
+
+#define LEN_OFFSET (offsetof(FD_MSG_t, fields.len))
+#define LEN_SIZE (sizeof(((FD_MSG_t *)0)->fields.len))
+
+#define FIXED_MESSAGE_SIZE (offsetof(FD_MSG_t, fields.crc16) + sizeof(((FD_MSG_t *)0)->fields.crc16))
 
 #define PACK_STRUCT 							__attribute__((__packed__))
 
@@ -82,11 +93,11 @@ typedef union PACK_STRUCT
 	struct PACK_STRUCT
 	{
 		uint16_t header;
-		uint16_t version :10;
-		uint8_t type_message :2;
+		uint16_t version;
+		uint8_t type_message;
 		uint16_t sequence_number;
 		uint8_t cmd;
-		uint16_t len :10;
+		uint16_t len;
 		uint16_t crc16;
 	} fields;
 } FD_MSG_t;
@@ -187,8 +198,6 @@ static size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
 {
 	size_t success = false;
 
-	FDInstance->link[NumberLine].buffer_line[0] = 0;
-	FDInstance->link[NumberLine].buffer_line[1] = 0;
 	FDInstance->link[NumberLine].error_timeout_cnt = 0;
 	FDInstance->link[NumberLine].line_state = LINE_FREE;
 	FDInstance->link[NumberLine].time_retransmit = 0;
@@ -202,8 +211,7 @@ static int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t Seq
 
 	for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
 	{
-		uint16_t sequence_number = ((uint16_t) FDInstance->link[i].buffer_line[4] << 8 | FDInstance->link[i].buffer_line[5]);
-		if (sequence_number == SequenceNumber)
+		if (FDInstance->link[i].buffer_line->fields.sequence_number == SequenceNumber)
 		{
 			index_with_sequence_number = i;
 			break;
@@ -227,7 +235,7 @@ static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 {
 	size_t success = false;
 
-	HAL_UART_Transmit_DMA(FDInstance->uart, FDInstance->link[line].buffer_line, FDInstance->link[line].message_length);
+	HAL_UART_Transmit_DMA(FDInstance->uart, FDInstance->link[line].buffer_line->data, FDInstance->link[line].message_length);
 	FDInstance->flags.bits.send_message = true;
 	FDInstance->link[line].line_state = LINE_SENT_DMA;
 
@@ -235,10 +243,25 @@ static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 	return success;
 }
 
+static bool _FDUSART_ShouldCheckHeader(size_t index)
+{
+	return !gInstances_Receiving[index].Flags.bits.header_ok && gInstances_Receiving[index].cnt_byte_received >= (HEADER_OFFSET + HEADER_SIZE);
+}
+
+static bool _FDUSART_ShouldCheckProtocolVersion(size_t index)
+{
+	return !gInstances_Receiving[index].Flags.bits.version_protocol_ok && gInstances_Receiving[index].cnt_byte_received >= (VERSION_OFFSET + VERSION_SIZE);
+}
+
+static bool _FDUSART_ShouldCheckSizeMessage(size_t index)
+{
+	return !gInstances_Receiving[index].Flags.bits.size_buffer_ok && gInstances_Receiving[index].cnt_byte_received >= (LEN_OFFSET + LEN_SIZE);
+}
+
 static bool _FDUSART_CheckHeader(size_t index)
 {
-	if (gInstances_Receiving[index].buffer_received[0] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
-			&& gInstances_Receiving[index].buffer_received[1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
+	if (gInstances_Receiving[index].buffer_received[HEADER_OFFSET] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
+			&& gInstances_Receiving[index].buffer_received[HEADER_OFFSET + 1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
 	{
 		return true;
 	}
@@ -247,7 +270,7 @@ static bool _FDUSART_CheckHeader(size_t index)
 
 static bool _FDUSART_CheckProtocolVersion(size_t index)
 {
-	if (gInstances_Receiving[index].buffer_received[2] == PROTOCOL_VERSION)
+	if (gInstances_Receiving[index].buffer_received[VERSION_OFFSET] == PROTOCOL_VERSION)
 	{
 		return true;
 	}
@@ -256,9 +279,8 @@ static bool _FDUSART_CheckProtocolVersion(size_t index)
 
 static bool _FDUSART_CheckSizeMessage(size_t index)
 {
-	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[7] << 8)
-			| gInstances_Receiving[index].buffer_received[8]);
-	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - SIZE_HEADER))
+	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[LEN_OFFSET] << 8) | gInstances_Receiving[index].buffer_received[LEN_OFFSET + 1]);
+	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - FIXED_MESSAGE_SIZE))
 	{
 		return true;
 	}
@@ -291,16 +313,19 @@ static size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 
 	_FDUSART_ClearLine(FDInstance, line_free_id);
 
-	memcpy(&FDInstance->link[line_free_id].buffer_line[0], Buf, (Len + SIZE_HEADER - 2)); //-2 of CRC
+	size_t header_offset = offsetof(FD_MSG_t, fields.header);
+	size_t data_size = offsetof(FD_MSG_t, fields.crc16) - offsetof(FD_MSG_t, fields.header) + Len;
 
-	FDInstance->link[line_free_id].buffer_line[3] = MESSAGE_ACK;
+	memcpy(&FDInstance->link[line_free_id].buffer_line, Buf + header_offset, data_size);
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line, Len + SIZE_HEADER - 2); //Calculate CRC based into message and header
+	FDInstance->link[line_free_id].buffer_line->fields.type_message = (uint8_t) MESSAGE_ACK;
 
-	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 2] = (uint8_t) (crc >> 8);
-	FDInstance->link[line_free_id].buffer_line[Len + SIZE_HEADER - 1] = (uint8_t) crc;
+	size_t crc_data_length = offsetof(FD_MSG_t, fields.crc16) + Len;
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line->data, crc_data_length);
 
-	FDInstance->link[line_free_id].message_length = Len + SIZE_HEADER;
+	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
+
+	FDInstance->link[line_free_id].message_length = sizeof(((FD_MSG_t*) 0)->fields) + Len;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -337,7 +362,7 @@ static bool _FDUSART_HandleMessageOrACK(FD_t *FDInstance, size_t search_instance
 
 	if (currentMessageStruct->fields.type_message == MESSAGE_SEND)
 	{
-		_FDUSART_SendACK(gInstances[search_instance], currentMessageStruct->data);
+		_FDUSART_SendACK((void*)gInstances[search_instance], currentMessageStruct->data, currentMessageStruct->fields.len);
 	}
 	else
 	{
@@ -359,6 +384,8 @@ static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len)
 
 	return received_crc == calculated_crc;
 }
+
+/* PRIVATE FUNCTIONS TO PROTOCOL MESSAGE */
 
 /********************************************************************************
  ******* FUNCTIONS
@@ -388,7 +415,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 			// Allocated dinamic memeory
 			for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
 			{
-				fd_return->link[i].buffer_line = (FD_MSG_t*) malloc(fd_return->size_buffer + SIZE_HEADER);
+				fd_return->link[i].buffer_line = (FD_MSG_t*) malloc(fd_return->size_buffer + sizeof(((FD_MSG_t*) 0)->fields));
 				if (fd_return->link[i].buffer_line == NULL)
 				{
 					// Free previously allocated memory
@@ -399,7 +426,7 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 					success = false;
 					break;
 				}
-				memset(fd_return->link[i].buffer_line, 0, fd_return->size_buffer + SIZE_HEADER);
+				memset(fd_return->link[i].buffer_line, 0, fd_return->size_buffer + sizeof(((FD_MSG_t*) 0)->fields));
 				success = true;
 			}
 		}
@@ -496,57 +523,48 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	gInstances_Receiving[i].buffer_received[gInstances_Receiving[i].cnt_byte_received++] = gTemp_Message_Receive[0];
 
 	/* Check header */
-	if (!gInstances_Receiving[i].Flags.bits.header_ok)
+	if (_FDUSART_ShouldCheckHeader(i))
 	{
-		if (gInstances_Receiving[i].cnt_byte_received >= 2)
+		if (!_FDUSART_CheckHeader(i))
 		{
-			if (!_FDUSART_CheckHeader(i))
-			{
-				_FDUSART_ResetReceiving(i);
-				return;
-			}
-			gInstances_Receiving[i].Flags.bits.header_ok = true;
+			_FDUSART_ResetReceiving(i);
+			return;
 		}
+		gInstances_Receiving[i].Flags.bits.header_ok = true;
 	}
 
 	/* Check version protocol */
-	if (!gInstances_Receiving[i].Flags.bits.version_protocol_ok)
+	if (_FDUSART_ShouldCheckProtocolVersion(i))
 	{
-		if (gInstances_Receiving[i].cnt_byte_received >= 3)
+		if (!_FDUSART_CheckProtocolVersion(i))
 		{
-			if (!_FDUSART_CheckProtocolVersion(i))
-			{
-				_FDUSART_ResetReceiving(i);
-				return;
-			}
-			gInstances_Receiving[i].Flags.bits.version_protocol_ok = true;
+			_FDUSART_ResetReceiving(i);
+			return;
 		}
+		gInstances_Receiving[i].Flags.bits.version_protocol_ok = true;
 	}
 
 	/* Check size message */
-	if (!gInstances_Receiving[i].Flags.bits.size_buffer_ok)
+	if (_FDUSART_ShouldCheckSizeMessage(i))
 	{
-		if (gInstances_Receiving[i].cnt_byte_received >= 9)
+		if (!_FDUSART_CheckSizeMessage(i))
 		{
-			if (!_FDUSART_CheckSizeMessage(i))
-			{
-				_FDUSART_ResetReceiving(i);
-				return;
-			}
-			gInstances_Receiving[i].Flags.bits.size_buffer_ok = true;
+			_FDUSART_ResetReceiving(i);
+			return;
 		}
+		gInstances_Receiving[i].Flags.bits.size_buffer_ok = true;
 	}
 
-	if (gInstances_Receiving[i].cnt_byte_received >= gInstances_Receiving[i].size_message + SIZE_HEADER)
+	if (gInstances_Receiving[i].cnt_byte_received >= gInstances_Receiving[i].size_message + FIXED_MESSAGE_SIZE)
 	{
 		uint16_t index_free = gInstances_Receiving[i].cnt_messages_for_read++;
 		if (index_free > FDUSART_BUFFER_RECEIVE)
-		{ //Buffer full
+		{
+			// Buffer cheio
 			gInstances_Receiving[i].cnt_messages_for_read = 0;
 			index_free = 0;
 		}
-		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received,
-				gInstances_Receiving[i].size_message + SIZE_HEADER);
+		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received, gInstances_Receiving[i].size_message + FIXED_MESSAGE_SIZE);
 		_FDUSART_ResetReceiving(i);
 	}
 
@@ -604,7 +622,7 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 
 	instance->flags.bits.send_message = false;
 
-	if (instance->link[j].buffer_line[3] == MESSAGE_ACK)
+	if (instance->link[j].buffer_line->fields.type_message == MESSAGE_ACK)
 	{ //If response with ACK no wait
 		_FDUSART_ClearLine(instance, j);
 	}
@@ -631,11 +649,12 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
  }
  }
 
- }*/
+ }
+ */
 
-size_t FDUSART_InterruptControl()
+bool FDUSART_InterruptControl()
 {
-	size_t success = false;
+	bool success = false;
 	FD_t *instance;
 	size_t i;
 
@@ -732,11 +751,10 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 	 sizeof(FDInstance->link[line_free_id].buffer_line->fields.len) retorna o tamanho do campo len, então o ponteiro se move para o byte após o len.
 	 O resultado é o endereço inicial onde você quer copiar sua mensagem. */
 
-	uint8_t *messageStart = (uint8_t*) FDInstance->link[line_free_id].buffer_line + offsetof(FD_MSG_t, fields.len)
-			+ sizeof(FDInstance->link[line_free_id].buffer_line->fields.len);
+	uint8_t *messageStart = (uint8_t*) FDInstance->link[line_free_id].buffer_line + offsetof(FD_MSG_t, fields.len) + sizeof(FDInstance->link[line_free_id].buffer_line->fields.len);
 	memcpy(messageStart, Buf, Len);
 
-	uint16_t crc = CRC16_CCITT_Calculate(&(FDInstance->link[line_free_id].buffer_line->data), offsetof(FD_MSG_t, fields.crc16)); //Calculate CRC based into message and header
+	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line->data, offsetof(FD_MSG_t, fields.crc16) + Len); //Calculate CRC based into message and header
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
 	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len;
@@ -750,8 +768,7 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 
 bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
-	bool success = false;
-
+	// Check null pointers and valid input
 	if (!FDInstance || !Cmd || !Buf || !Len)
 		return false;
 
@@ -765,15 +782,15 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 	{
 		FD_MSG_t *currentMessage = (FD_MSG_t*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
 
-		uint16_t sequence_number = 0;
+		size_t sequence_number = 0;
 
-		if (!_FDUSART_ExtractMessageDetails(currentMessage, &sequence_number, Cmd, Len, &sequence_number))
+		if (!_FDUSART_ExtractMessageDetails(currentMessage, Cmd, Len, &sequence_number))
 		{
 			index_message_for_read--;
 			continue;
 		}
 
-		if (!_FDUSART_HandleMessageOrACK(FDInstance, search_instance, &index_message_for_read, sequence_number))
+		if (!_FDUSART_HandleMessageOrACK(FDInstance, search_instance, index_message_for_read))
 		{
 			index_message_for_read--;
 			continue;
@@ -785,93 +802,14 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 			continue;
 		}
 
-        uint8_t* messageStart = currentMessage->data + offsetof(FD_MSG_t, fields.crc16) + sizeof(currentMessage->fields.crc16);
-        memcpy(Buf, messageStart, *Len);
+		uint8_t *messageStart = currentMessage->data + offsetof(FD_MSG_t, fields.crc16) + sizeof(currentMessage->fields.crc16);
+		memcpy(Buf, messageStart, *Len);
 
-        gInstances_Receiving[search_instance].cnt_messages_for_read--;
+		gInstances_Receiving[search_instance].cnt_messages_for_read--;
 
 		return true;
 
 	}
 	return false;
-}
-
-bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
-{
-
-	bool success = false;
-	size_t search_instance;
-
-	// Check null pointers and valid input
-	if (!FDInstance || !Cmd || !Buf || !Len)
-		return success;
-
-	for (search_instance = 0; search_instance < MAX_UART_INSTANCES; search_instance++)
-	{
-		if (gInstances[search_instance]->uart->Instance == FDInstance->uart->Instance)
-		{
-			break;
-		}
-	}
-
-	if (search_instance >= MAX_UART_INSTANCES)
-	{
-		return success;
-	}
-
-	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read - 1;
-	while (index_message_for_read > -1)
-	{ //If exists message for read
-
-		uint8_t *currentMessage = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
-
-		// Extract message details: sequence number, command, and size.
-		uint16_t sequence_number = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][4] << 8)
-				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][5];
-
-		*Cmd = gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][6];
-		*Len = (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][7] << 8)
-				| gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][8];
-
-		//If new message, send ACK
-		if (gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][3] == MESSAGE_SEND)
-		{
-
-			//FDUSART_SendMessage((void*) gInstances[search_instance], *Cmd, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
-			_FDUSART_SendACK((void*) gInstances[search_instance], (void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read],
-					*Len);
-
-		}
-		else
-		{ // If the message is just an ACK, delete the message and subtract it from the message counter
-			index_message_for_read = --gInstances_Receiving[search_instance].cnt_messages_for_read;
-			int16_t index_sequence_number = _FDUSART_SearchIndexSequenceNumber((void*) &FDInstance, sequence_number);
-			_FDUSART_ClearLine((void*) &FDInstance, index_sequence_number);
-			continue;
-		}
-
-		// Validate CRC
-		uint16_t received_crc = (uint16_t) ((int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER
-				- 2] << 8) | (int16_t) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][*Len + SIZE_HEADER - 1];
-		uint16_t calculated_crc = CRC16_CCITT_Calculate((void*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read],
-				*Len + SIZE_HEADER - 2);
-
-		if (received_crc != calculated_crc)
-		{
-			// invalid CRC, you might want to log this error or notify the user
-			index_message_for_read = --gInstances_Receiving[search_instance].cnt_messages_for_read;
-			continue;
-		}
-
-		// Copy the validated message to the provided buffer
-		memcpy(Buf, (void*) &gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read][9], *Len);
-
-		gInstances_Receiving[search_instance].cnt_messages_for_read--;
-
-		success = true;
-		break;
-	}
-
-	return success;
 }
 

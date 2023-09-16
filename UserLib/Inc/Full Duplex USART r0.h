@@ -55,10 +55,10 @@ typedef struct FD_struct_t FD_t;
 FD_t* FDUSART_Init(const FD_CONFIG_t *config);
 void FDUSART_DeInit(FD_t **fd);
 
-size_t FDUSART_InterruptControl();
+bool FDUSART_InterruptControl();
 
-size_t FDUSART_SendMessage(FD_t *FDInstance , uint8_t Cmd, uint8_t *Buf, size_t Len);
-size_t FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len);
+bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len);
+bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len);
 
 #ifdef __cplusplus
 }
