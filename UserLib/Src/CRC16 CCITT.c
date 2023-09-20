@@ -32,6 +32,7 @@ uint16_t CRC16_CCITT_Calculate(const uint8_t *data, size_t length)
 
 	for (size_t i = 0; i < length; i++)
 	{
+		uint8_t dataa = data[i];
 		crc ^= (uint16_t) data[i] << 8; // "Place the current byte into the MSB of the CRC for the XOR.
 
 		for (int j = 0; j < 8; j++)
