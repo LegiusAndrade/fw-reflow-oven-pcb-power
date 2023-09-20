@@ -1178,7 +1178,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 
 		if(Cnt1ms % 1000 == 0)
 		{
-			FDUSART_SendMessage(FullDuplexSystem, 0x01, 0x01, 1);
+			uint8_t teste = 0x01;
+			//FDUSART_SendMessage(FullDuplexSystem, 0x01, &teste, 1);
 		}
 
 		/* Power on relay inrush */

@@ -87,19 +87,21 @@ typedef union
 	uint16_t all_flags;
 } FD_FLAGS_t;
 
-typedef union PACK_STRUCT
+typedef struct PACK_STRUCT
 {
-	uint8_t *data;
-	struct PACK_STRUCT
-	{
-		uint16_t header;
-		uint16_t version;
-		uint8_t type_message;
-		uint16_t sequence_number;
-		uint8_t cmd;
-		uint16_t len;
-		uint16_t crc16;
-	} fields;
+	uint16_t header;
+	uint8_t version;
+	uint8_t type_message;
+	uint16_t sequence_number;
+	uint8_t cmd;
+	uint16_t len;
+	uint16_t crc16;
+} FD_HEADER_t;
+
+typedef struct
+{
+	FD_HEADER_t fields;
+	uint8_t message[];
 } FD_MSG_t;
 
 typedef struct
@@ -160,8 +162,8 @@ uint8_t gTemp_Message_Receive[FDUSART_SIZE_MAX_MESSAGE] =
 /********************************************************************************
  ******* PROTOTYPE PRIVATE FUNCTIONS
  *******************************************************************************/
-static size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree);
-static size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine);
+static bool _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree);
+static bool _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine);
 static int16_t _FDUSART_SearchIndexSequenceNumber(FD_t *FDInstance, uint16_t SequenceNumber);
 static void _FDUSART_MakeToSend(FD_t *FDInstance, uint16_t NumberLine);
 static void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value);
@@ -174,13 +176,14 @@ static bool _FDUSART_HandleMessageOrACK(FD_t *FDInstance, size_t search_instance
 static size_t _FDUSART_SearchUARTInstance(FD_t *FDInstance);
 static bool _FDUSART_ExtractMessageDetails(FD_MSG_t *message, uint8_t *cmd, size_t *len, size_t *sequence_number);
 static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len);
+static uint16_t _FDUSART_CalcCRCProtocol(FD_MSG_t *message);
 
 /********************************************************************************
  ******* PRIVATE FUNCTIONS
  *******************************************************************************/
-static size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
+static bool _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
 {
-	size_t success = false;
+	bool success = false;
 	uint16_t line_free_id = 0;
 	for (line_free_id = 0; line_free_id < FDUSART_BUFFER_LINES; line_free_id++)
 	{
@@ -194,9 +197,9 @@ static size_t _FDUSART_SearchLineFree(FD_t *FDInstance, uint16_t *LineFree)
 	return success;
 }
 
-static size_t _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
+static bool _FDUSART_ClearLine(FD_t *FDInstance, uint16_t NumberLine)
 {
-	size_t success = false;
+	bool success = false;
 
 	FDInstance->link[NumberLine].error_timeout_cnt = 0;
 	FDInstance->link[NumberLine].line_state = LINE_FREE;
@@ -235,7 +238,7 @@ static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 {
 	size_t success = false;
 
-	HAL_UART_Transmit_DMA(FDInstance->uart, FDInstance->link[line].buffer_line->data, FDInstance->link[line].message_length);
+	HAL_UART_Transmit_DMA(FDInstance->uart, (uint8_t*) FDInstance->link[line].buffer_line, FDInstance->link[line].message_length);
 	FDInstance->flags.bits.send_message = true;
 	FDInstance->link[line].line_state = LINE_SENT_DMA;
 
@@ -260,8 +263,8 @@ static bool _FDUSART_ShouldCheckSizeMessage(size_t index)
 
 static bool _FDUSART_CheckHeader(size_t index)
 {
-	if (gInstances_Receiving[index].buffer_received[HEADER_OFFSET] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
-			&& gInstances_Receiving[index].buffer_received[HEADER_OFFSET + 1] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
+	if (gInstances_Receiving[index].buffer_received[HEADER_OFFSET+ 1] == (uint8_t) ((MESSAGE_ID_SEND & 0xFF00) >> 8)
+			&& gInstances_Receiving[index].buffer_received[HEADER_OFFSET ] == (uint8_t) (MESSAGE_ID_SEND & 0x00FF))
 	{
 		return true;
 	}
@@ -279,7 +282,7 @@ static bool _FDUSART_CheckProtocolVersion(size_t index)
 
 static bool _FDUSART_CheckSizeMessage(size_t index)
 {
-	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[LEN_OFFSET] << 8) | gInstances_Receiving[index].buffer_received[LEN_OFFSET + 1]);
+	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[LEN_OFFSET+ 1] << 8) | gInstances_Receiving[index].buffer_received[LEN_OFFSET ]);
 	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - FIXED_MESSAGE_SIZE))
 	{
 		return true;
@@ -293,10 +296,10 @@ static void _FDUSART_ResetReceiving(size_t index)
 	gInstances_Receiving[index].cnt_byte_received = 0;
 }
 
-static size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
+static bool _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 {
 	uint16_t line_free_id = 0;
-	size_t success = false;
+	bool success = false;
 
 	/* All lines occupied */
 	if (!_FDUSART_SearchLineFree(FDInstance, &line_free_id))
@@ -316,12 +319,13 @@ static size_t _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 	size_t header_offset = offsetof(FD_MSG_t, fields.header);
 	size_t data_size = offsetof(FD_MSG_t, fields.crc16) - offsetof(FD_MSG_t, fields.header) + Len;
 
+	Todo estou aqui, ver uma forma ou de colocar o CRC la por ultimo ou antes dos dados. Se for antes dos dados ver como arrumar aqui
+
 	memcpy(&FDInstance->link[line_free_id].buffer_line, Buf + header_offset, data_size);
 
 	FDInstance->link[line_free_id].buffer_line->fields.type_message = (uint8_t) MESSAGE_ACK;
 
-	size_t crc_data_length = offsetof(FD_MSG_t, fields.crc16) + Len;
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line->data, crc_data_length);
+	uint16_t crc = _FDUSART_CalcCRCProtocol(FDInstance->link[line_free_id].buffer_line); //Calculate CRC based into message and header
 
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
@@ -362,7 +366,7 @@ static bool _FDUSART_HandleMessageOrACK(FD_t *FDInstance, size_t search_instance
 
 	if (currentMessageStruct->fields.type_message == MESSAGE_SEND)
 	{
-		_FDUSART_SendACK((void*)gInstances[search_instance], currentMessageStruct->data, currentMessageStruct->fields.len);
+		_FDUSART_SendACK((void*) gInstances[search_instance], (uint8_t*) currentMessageStruct, currentMessageStruct->fields.len);
 	}
 	else
 	{
@@ -380,12 +384,32 @@ static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len)
 
 	uint16_t received_crc = message->fields.crc16;
 
-	uint16_t calculated_crc = CRC16_CCITT_Calculate(message->data, len + offsetof(FD_MSG_t, fields.crc16));
+	//size_t totalSize = len + offsetof(FD_MSG_t, fields.crc16);
+
+	uint16_t calculated_crc = _FDUSART_CalcCRCProtocol(message); //Calculate CRC based into message and header
 
 	return received_crc == calculated_crc;
 }
 
-/* PRIVATE FUNCTIONS TO PROTOCOL MESSAGE */
+static uint16_t _FDUSART_CalcCRCProtocol(FD_MSG_t *message)
+{
+	// Calculando o tamanho dos campos até o campo 'crc16' (excluindo o próprio campo 'crc16')
+	size_t headerSize = offsetof(FD_MSG_t, fields.crc16);
+
+	// O tamanho total que você quer calcular o CRC é o tamanho do cabeçalho mais a quantidade de dados em 'message'
+	size_t totalSize = headerSize + message->fields.len; // Supondo que 'len' indique a quantidade de bytes em 'message'
+
+	uint8_t data_for_calc_crc[totalSize];
+
+	// Se quiser zerar o buffer (embora possa não ser necessário se você estiver preenchendo todo o buffer posteriormente)
+	memset(data_for_calc_crc, 0, totalSize);
+
+	memcpy(data_for_calc_crc, (uint8_t*) message, headerSize);
+	memcpy(data_for_calc_crc + headerSize, message->message, message->fields.len); // Note que mudei "Len" para "message->fields.len"
+
+	uint16_t crc = CRC16_CCITT_Calculate(data_for_calc_crc, totalSize);
+	return crc;
+}
 
 /********************************************************************************
  ******* FUNCTIONS
@@ -399,6 +423,11 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 
 	FD_t *fd_return;
 
+	if (config->size_buffer > FDUSART_SIZE_MAX_MESSAGE)
+	{
+		return NULL;
+	}
+
 	fd_return = (FD_t*) malloc(sizeof(FD_t));
 
 	if (fd_return != NULL)
@@ -409,26 +438,25 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 		fd_return->flags.bits.initialized = true;
 		fd_return->uart = config->uart;
 
-		if (config->size_buffer <= FDUSART_SIZE_MAX_MESSAGE)
+		fd_return->size_buffer = config->size_buffer;
+		// Allocated dinamic memeory
+		for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
 		{
-			fd_return->size_buffer = config->size_buffer;
-			// Allocated dinamic memeory
-			for (size_t i = 0; i < FDUSART_BUFFER_LINES; i++)
+			fd_return->link[i].buffer_line = (FD_MSG_t*) malloc(sizeof(FD_MSG_t) + fd_return->size_buffer * sizeof(uint8_t));
+
+			if (fd_return->link[i].buffer_line == NULL)
 			{
-				fd_return->link[i].buffer_line = (FD_MSG_t*) malloc(fd_return->size_buffer + sizeof(((FD_MSG_t*) 0)->fields));
-				if (fd_return->link[i].buffer_line == NULL)
+				// Free previously allocated memory
+				for (size_t j = 0; j < i; j++)
 				{
-					// Free previously allocated memory
-					for (size_t j = 0; j < i; j++)
-					{
-						free(fd_return->link[j].buffer_line);
-					}
-					success = false;
-					break;
+					free(fd_return->link[j].buffer_line);
 				}
-				memset(fd_return->link[i].buffer_line, 0, fd_return->size_buffer + sizeof(((FD_MSG_t*) 0)->fields));
-				success = true;
+				success = false;
+				break;
 			}
+			memset(fd_return->link[i].buffer_line, 0, sizeof(FD_MSG_t) + fd_return->size_buffer * sizeof(uint8_t));
+
+			success = true;
 		}
 
 	}
@@ -747,17 +775,13 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 	FDInstance->link[line_free_id].buffer_line->fields.cmd = Cmd;
 	FDInstance->link[line_free_id].buffer_line->fields.len = Len;
 
-	/* offsetof(FD_MSG_t, fields.len) retorna o deslocamento do membro len dentro da estrutura.
-	 sizeof(FDInstance->link[line_free_id].buffer_line->fields.len) retorna o tamanho do campo len, então o ponteiro se move para o byte após o len.
-	 O resultado é o endereço inicial onde você quer copiar sua mensagem. */
-
-	uint8_t *messageStart = (uint8_t*) FDInstance->link[line_free_id].buffer_line + offsetof(FD_MSG_t, fields.len) + sizeof(FDInstance->link[line_free_id].buffer_line->fields.len);
+	uint8_t *messageStart = &(FDInstance->link[line_free_id].buffer_line->message[0]);
 	memcpy(messageStart, Buf, Len);
 
-	uint16_t crc = CRC16_CCITT_Calculate(FDInstance->link[line_free_id].buffer_line->data, offsetof(FD_MSG_t, fields.crc16) + Len); //Calculate CRC based into message and header
+	uint16_t crc = _FDUSART_CalcCRCProtocol(FDInstance->link[line_free_id].buffer_line); //Calculate CRC based into message and header
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
-	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len;
+	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len - 1;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -790,20 +814,18 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 			continue;
 		}
 
-		if (!_FDUSART_HandleMessageOrACK(FDInstance, search_instance, index_message_for_read))
-		{
-			index_message_for_read--;
-			continue;
-		}
-
 		if (!_FDUSART_ValidateMessageCRC(currentMessage, *Len))
 		{
 			index_message_for_read--;
 			continue;
 		}
 
-		uint8_t *messageStart = currentMessage->data + offsetof(FD_MSG_t, fields.crc16) + sizeof(currentMessage->fields.crc16);
-		memcpy(Buf, messageStart, *Len);
+		if (!_FDUSART_HandleMessageOrACK(FDInstance, search_instance, index_message_for_read))
+		{
+			index_message_for_read--;
+			continue;
+		}
+		memcpy(Buf, &(currentMessage->message[0]), *Len);
 
 		gInstances_Receiving[search_instance].cnt_messages_for_read--;
 
