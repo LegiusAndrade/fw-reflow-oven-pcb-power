@@ -266,7 +266,10 @@ void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ingoredCR
 	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.sequence_number), sizeof(FDMessage->fields.sequence_number), &offset);
 	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.cmd), sizeof(FDMessage->fields.cmd), &offset);
 	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.len), sizeof(FDMessage->fields.len), &offset);
-	_FDUSART_CopyToBuf(buf, FDMessage->message, FDMessage->fields.len, &offset);  // Aqui, usei `FDMessage->len` diretamente.
+
+
+	memcpy(buf + offset, FDMessage->message, FDMessage->fields.len);
+	    offset +=  FDMessage->fields.len;
 	if (!ingoredCRC)
 		_FDUSART_CopyToBuf(buf, &(FDMessage->fields.crc16), sizeof(FDMessage->fields.crc16), &offset);
 }
@@ -854,6 +857,10 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 	while (index_message_for_read > -1)
 	{
 		FD_MSG_t *currentMessage = (FD_MSG_t*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read];
+
+		todo aqui fazer com que seja montado a mensagem, tipo o CRC tem que vir por ultimo
+		Se possível deixar a mensagem de transmissão igual na recepção tipo casando todos os bytes
+		tipo se for big endian, deixar os dois lados big endian.
 
 		size_t sequence_number = 0;
 
