@@ -836,7 +836,7 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
-	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len - 1;
+	FDInstance->link[line_free_id].message_length = sizeof(FD_MSG_t) + Len;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
