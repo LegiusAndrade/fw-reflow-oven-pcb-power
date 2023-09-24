@@ -374,6 +374,11 @@ int main(void)
 	/* USER CODE END 3 */
 }
 
+todo: proxima tarefa fazer um contador de retransmissão
+um contador para mensagens erradas e excluidas,crc errado
+no rasp colocar um contador de mensagem invalida tbm
+nos rasp e aqui
+
 /**
  * @brief System Clock Configuration
  * @retval None
@@ -1180,6 +1185,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			uint8_t teste[] = {0xAB, 0xCD, 0xEF};
 			FDUSART_SendMessage(FullDuplexSystem, 0x01, teste, sizeof(teste));
+			//todo: agora fazer com que o rasp envie a mensagem e ver como aqui se comporta e manda o ACK pro rasp, dai ver como ele se comporta com o ACk recebido
 		}
 
 		/* Power on relay inrush */
