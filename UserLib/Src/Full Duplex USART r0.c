@@ -42,7 +42,7 @@
 #define FDUSART_SIZE_MAX_MESSAGE				50			// MAX size in one line of the buffer
 #define FDUSART_BUFFER_RECEIVE					20			// Size pack receive
 
-#define FDUSART_TIME_RETRANSMIT_IF_NORESPONSE	100			// If not receive response of message sent, retransmit message and increment in error
+#define FDUSART_TIME_RETRANSMIT_IF_NORESPONSE	500			// If not receive response of message sent, retransmit message and increment in error
 #define FDUSART_MAX_ERROR						5			// Max error if not receive message
 #define FDUSART_TX_TIMEOUT						10			// Timeout each byte sent
 #define FDUSART_RX_TIMEOUT						100			// Timeout receive message complete
@@ -50,6 +50,8 @@
 #define MESSAGE_ID_SEND							0xBEBE		// Protocol init message for send
 #define PROTOCOL_VERSION						100			// Protocol version: 1.00
 //#define SIZE_HEADER								11			// 2Bytes (ID) 	 + 1Byte (VERSION) + 1 Byte (TYPE MESSAGE) + 2Bytes (SEQUENCE NUMBER) + 1Byte (COMMAND MESSAGE) + 1Byte (SIZE MESSAGE) + 2Bytes (CRC)
+
+#define DELAY_EACH_MESSAGE						10 			// Delay in each message
 
 #define HEADER_OFFSET (offsetof(FD_MSG_t, fields.header))
 #define HEADER_SIZE (sizeof(((FD_MSG_t *)0)->fields.header))
@@ -108,7 +110,7 @@ typedef struct
 {
 	LINE_STATE_t line_state;
 	FD_MSG_t *buffer_line;
-	uint8_t time_retransmit;
+	uint16_t time_retransmit;
 	uint8_t error_timeout_cnt;
 	size_t message_length;
 } FD_LINK_t;
@@ -124,7 +126,7 @@ struct FD_struct_t
 
 typedef struct
 {
-	uint8_t buffer_received[FDUSART_SIZE_MAX_MESSAGE];
+	uint8_t buffer_received[FDUSART_SIZE_MAX_MESSAGE + HEADER_SIZE];
 	uint16_t cnt_byte_received;
 	uint16_t size_message;
 	uint16_t time_receiving;
@@ -155,6 +157,11 @@ volatile FD_t *gInstances[MAX_UART_INSTANCES] =
 uint8_t gTemp_Message_Receive[FDUSART_SIZE_MAX_MESSAGE] =
 { 0 };
 
+uint16_t countDelayEachMessage = 0;
+
+uint16_t countRetransmission = 0;
+uint16_t countMessageError = 0;
+
 /********************************************************************************
  ******* VARIABLES
  *******************************************************************************/
@@ -177,11 +184,11 @@ static size_t _FDUSART_SearchUARTInstance(FD_t *FDInstance);
 static bool _FDUSART_ExtractMessageDetails(FD_MSG_t *message, uint8_t *cmd, size_t *len, size_t *sequence_number);
 static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len);
 static uint16_t _FDUSART_CalcCRCProtocol(FD_MSG_t *message);
-void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *offset);
-void _FDUSART_CopyFromBuf(void *dest, uint8_t *source, size_t size, size_t *offset);
-void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC);
-void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest);
-
+static void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *offset);
+static void _FDUSART_CopyFromBuf(void *dest, uint8_t *source, size_t size, size_t *offset);
+static void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC);
+static void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest);
+static void _FDUSART_VerifyHasMessageForSend(FD_t *FDInstance);
 /********************************************************************************
  ******* PRIVATE FUNCTIONS
  *******************************************************************************/
@@ -240,7 +247,7 @@ static void _FDUSART_SetFlagFullBuf(FD_t *FDInstance, uint8_t flag_value)
 	FDInstance->flags.bits.full_buf = (flag_value & 0x01);
 }
 
-void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *offset)
+static void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *offset)
 {
 	memcpy(buf + *offset, message, size);
 	*offset += size;
@@ -263,13 +270,13 @@ void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *offset)
 
 	 *offset += size;*/
 }
-void _FDUSART_CopyFromBuf(void *dest, uint8_t *source, size_t size, size_t *offset)
+static void _FDUSART_CopyFromBuf(void *dest, uint8_t *source, size_t size, size_t *offset)
 {
 	memcpy(dest, source + *offset, size);
 	*offset += size;
 }
 
-void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC)
+static void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC)
 {
 	size_t offset = 0;
 
@@ -286,7 +293,7 @@ void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC
 		_FDUSART_CopyToBuf(buf, &(FDMessage->fields.crc16), sizeof(FDMessage->fields.crc16), &offset);
 }
 
-void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest)
+static void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest)
 {
 	size_t offset = 0;
 
@@ -305,6 +312,8 @@ void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest)
 	_FDUSART_CopyFromBuf(&(dest->fields.crc16), source, sizeof(dest->fields.crc16), &offset);
 
 }
+
+
 static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 {
 	size_t success = false;
@@ -314,13 +323,16 @@ static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 
 	_FDUSART_ConstructMessage(FDInstance->link[line].buffer_line, buffer, false);
 
-	// Agora, envie o buffer usando HAL_UART_Transmit_DMA
-	HAL_UART_Transmit_DMA(FDInstance->uart, buffer, FDInstance->link[line].message_length);
-
 	FDInstance->flags.bits.send_message = true;
 	FDInstance->link[line].line_state = LINE_SENT_DMA;
 
 	success = true;
+	//memcpy(&teste[countsend++], buffer, sizeof(buffer));
+
+	// Agora, envie o buffer usando HAL_UART_Transmit_DMA
+
+	HAL_UART_Transmit_DMA(FDInstance->uart, (uint8_t *)buffer, FDInstance->link[line].message_length);
+
 	return success;
 }
 
@@ -724,14 +736,17 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 			break;
 		}
 	}
-
-	if (instance->link[j].buffer_line->fields.type_message == MESSAGE_ACK)
-	{ //If response with ACK no wait
-		_FDUSART_ClearLine(instance, j);
-	}
-	else
+	if (j < FDUSART_BUFFER_LINES)
 	{
-		instance->link[j].line_state = LINE_SENT_EXTRNAL;
+
+		if (instance->link[j].buffer_line->fields.type_message == MESSAGE_ACK)
+		{ //If response with ACK no wait
+			_FDUSART_ClearLine(instance, j);
+		}
+		else
+		{
+			instance->link[j].line_state = LINE_SENT_EXTRNAL;
+		}
 	}
 
 	instance->flags.bits.send_message = false;
@@ -773,12 +788,19 @@ bool FDUSART_InterruptControl()
 				/* Verifying if transmition mode */
 				if (!instance->flags.bits.send_message)
 				{
-					/* Search line ready for send */
-					if (instance->link[line].line_state == LINE_READY_FOR_SEND)
+					if (countDelayEachMessage >= DELAY_EACH_MESSAGE)
 					{
-						/* Activated DMA for transmit message */
-						success = _FDUSART_TransmitMessage(instance, line);
+						countDelayEachMessage = 0;
+						/* Search line ready for send */
+						if (instance->link[line].line_state == LINE_READY_FOR_SEND)
+						{
+							/* Activated DMA for transmit message */
+							success = _FDUSART_TransmitMessage(instance, line);
+						}
 					}
+					else
+						countDelayEachMessage++;
+
 				}
 
 				if (instance->link[line].line_state == LINE_SENT_EXTRNAL || instance->link[line].line_state == LINE_SENT_DMA)
@@ -786,9 +808,11 @@ bool FDUSART_InterruptControl()
 					instance->link[line].time_retransmit--; //Decrement time for retransmit
 					if (instance->link[line].time_retransmit == 0)
 					{
+						countRetransmission++;
 						instance->link[line].error_timeout_cnt++; //Increment number of tentative
 						if (instance->link[line].error_timeout_cnt >= FDUSART_MAX_ERROR) //If exceded tentatives
 						{
+							countMessageError++;
 							_FDUSART_ClearLine(instance, line);
 						}
 						else
