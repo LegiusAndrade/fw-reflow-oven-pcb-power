@@ -102,14 +102,14 @@ typedef struct PACK_STRUCT
 
 typedef struct
 {
-	FD_HEADER_t fields;
-	uint8_t message[];
+	volatile FD_HEADER_t fields;
+	volatile uint8_t message[];
 } FD_MSG_t;
 
 typedef struct
 {
 	LINE_STATE_t line_state;
-	FD_MSG_t *buffer_line;
+	volatile FD_MSG_t *buffer_line;
 	uint16_t time_retransmit;
 	uint8_t error_timeout_cnt;
 	size_t message_length;
@@ -188,7 +188,7 @@ static void _FDUSART_CopyToBuf(void *buf, void *message, size_t size, size_t *of
 static void _FDUSART_CopyFromBuf(void *dest, uint8_t *source, size_t size, size_t *offset);
 static void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ignoreCRC);
 static void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest);
-static void _FDUSART_VerifyHasMessageForSend(FD_t *FDInstance);
+
 /********************************************************************************
  ******* PRIVATE FUNCTIONS
  *******************************************************************************/
@@ -280,48 +280,52 @@ static void _FDUSART_ConstructMessage(FD_MSG_t *FDMessage, uint8_t *buf, bool ig
 {
 	size_t offset = 0;
 
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.header), sizeof(FDMessage->fields.header), &offset);
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.version), sizeof(FDMessage->fields.version), &offset);
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.type_message), sizeof(FDMessage->fields.type_message), &offset);
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.sequence_number), sizeof(FDMessage->fields.sequence_number), &offset);
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.cmd), sizeof(FDMessage->fields.cmd), &offset);
-	_FDUSART_CopyToBuf(buf, &(FDMessage->fields.len), sizeof(FDMessage->fields.len), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.header), sizeof(FDMessage->fields.header), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.version), sizeof(FDMessage->fields.version), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.type_message), sizeof(FDMessage->fields.type_message), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.sequence_number), sizeof(FDMessage->fields.sequence_number), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.cmd), sizeof(FDMessage->fields.cmd), &offset);
+	_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.len), sizeof(FDMessage->fields.len), &offset);
 
-	memcpy(buf + offset, FDMessage->message, FDMessage->fields.len);
+	memcpy(buf + offset, (FD_MSG_t*)FDMessage->message, FDMessage->fields.len);
 	offset += FDMessage->fields.len;
 	if (!ignoreCRC)
-		_FDUSART_CopyToBuf(buf, &(FDMessage->fields.crc16), sizeof(FDMessage->fields.crc16), &offset);
+		_FDUSART_CopyToBuf(buf, (FD_MSG_t*)&(FDMessage->fields.crc16), sizeof(FDMessage->fields.crc16), &offset);
 }
 
 static void _FDUSART_ConstructMessageReceived(uint8_t *source, FD_MSG_t *dest)
 {
 	size_t offset = 0;
 
-	_FDUSART_CopyFromBuf(&(dest->fields.header), source, sizeof(dest->fields.header), &offset);
-	_FDUSART_CopyFromBuf(&(dest->fields.version), source, sizeof(dest->fields.version), &offset);
-	_FDUSART_CopyFromBuf(&(dest->fields.type_message), source, sizeof(dest->fields.type_message), &offset);
-	_FDUSART_CopyFromBuf(&(dest->fields.sequence_number), source, sizeof(dest->fields.sequence_number), &offset);
-	_FDUSART_CopyFromBuf(&(dest->fields.cmd), source, sizeof(dest->fields.cmd), &offset);
-	_FDUSART_CopyFromBuf(&(dest->fields.len), source, sizeof(dest->fields.len), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.header), source, sizeof(dest->fields.header), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.version), source, sizeof(dest->fields.version), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.type_message), source, sizeof(dest->fields.type_message), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.sequence_number), source, sizeof(dest->fields.sequence_number), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.cmd), source, sizeof(dest->fields.cmd), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.len), source, sizeof(dest->fields.len), &offset);
 	if (dest->fields.len > FDUSART_SIZE_MAX_MESSAGE)
 	{
 		return;
 	}
-	memcpy(&(dest->message), source + offset, dest->fields.len);
+	memcpy((FD_MSG_t*)&(dest->message), source + offset, dest->fields.len);
 	offset += dest->fields.len;
-	_FDUSART_CopyFromBuf(&(dest->fields.crc16), source, sizeof(dest->fields.crc16), &offset);
+	_FDUSART_CopyFromBuf((FD_MSG_t*)&(dest->fields.crc16), source, sizeof(dest->fields.crc16), &offset);
 
 }
 
-
+#pragma GCC push_options
+#pragma GCC optimize ("-O0")
 static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 {
 	size_t success = false;
 
 	// Crie um buffer temporário
-	uint8_t buffer[sizeof(FD_MSG_t) + FDInstance->link[line].buffer_line->fields.len];
+	volatile uint8_t buffer[sizeof(FD_MSG_t) + FDInstance->link[line].buffer_line->fields.len];
 
-	_FDUSART_ConstructMessage(FDInstance->link[line].buffer_line, buffer, false);
+	/* Critical section */
+	//__disable_irq();                  /**< Disable all interrupts by setting PRIMASK bit on Cortex*/
+
+	_FDUSART_ConstructMessage((void*)FDInstance->link[line].buffer_line, (uint8_t*)buffer, false);
 
 	FDInstance->flags.bits.send_message = true;
 	FDInstance->link[line].line_state = LINE_SENT_DMA;
@@ -333,8 +337,12 @@ static size_t _FDUSART_TransmitMessage(FD_t *FDInstance, size_t line)
 
 	HAL_UART_Transmit_DMA(FDInstance->uart, (uint8_t *)buffer, FDInstance->link[line].message_length);
 
+	/* Critical section */
+	//__enable_irq();
+
 	return success;
 }
+#pragma GCC pop_options
 
 static bool _FDUSART_ShouldCheckHeader(size_t index)
 {
@@ -413,7 +421,7 @@ static bool _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 
 	FDInstance->link[line_free_id].buffer_line->fields.type_message = (uint8_t) MESSAGE_ACK;
 
-	uint16_t crc = _FDUSART_CalcCRCProtocol(FDInstance->link[line_free_id].buffer_line); //Calculate CRC based into message and header
+	uint16_t crc = _FDUSART_CalcCRCProtocol((void*)FDInstance->link[line_free_id].buffer_line); //Calculate CRC based into message and header
 
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
@@ -493,7 +501,7 @@ static uint16_t _FDUSART_CalcCRCProtocol(FD_MSG_t *message)
 	memset(data_for_calc_crc, 0, totalSize);
 
 	memcpy(data_for_calc_crc, (uint8_t*) message, headerSize);
-	memcpy(data_for_calc_crc + headerSize, message->message, message->fields.len); // Note que mudei "Len" para "message->fields.len"
+	memcpy(data_for_calc_crc + headerSize,(FD_MSG_t*) message->message, message->fields.len); // Note que mudei "Len" para "message->fields.len"
 
 	uint16_t crc = CRC16_CCITT_Calculate(data_for_calc_crc, totalSize);
 	return crc;
@@ -537,12 +545,12 @@ FD_t* FDUSART_Init(const FD_CONFIG_t *config)
 				// Free previously allocated memory
 				for (size_t j = 0; j < i; j++)
 				{
-					free(fd_return->link[j].buffer_line);
+					free((void*)fd_return->link[j].buffer_line);
 				}
 				success = false;
 				break;
 			}
-			memset(fd_return->link[i].buffer_line, 0, sizeof(FD_MSG_t) + fd_return->size_buffer * sizeof(uint8_t));
+			memset((void*)fd_return->link[i].buffer_line, 0, sizeof(FD_MSG_t) + fd_return->size_buffer * sizeof(uint8_t));
 
 			success = true;
 		}
@@ -606,7 +614,7 @@ void FDUSART_DeInit(FD_t **fd)
 	{
 		if ((*fd)->link[i].buffer_line != NULL)
 		{
-			free((*fd)->link[i].buffer_line);
+			free((void*)(*fd)->link[i].buffer_line);
 			(*fd)->link[i].buffer_line = NULL;
 		}
 	}
@@ -875,13 +883,13 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 	FDInstance->link[line_free_id].buffer_line->fields.cmd = Cmd;
 	FDInstance->link[line_free_id].buffer_line->fields.len = Len;
 
-	uint8_t *messageStart = &(FDInstance->link[line_free_id].buffer_line->message[0]);
+	uint8_t *messageStart = (void*)&(FDInstance->link[line_free_id].buffer_line->message[0]);
 	memcpy(messageStart, Buf, Len);
 
 	// Crie um buffer temporário
 	uint8_t buffer[sizeof(FD_MSG_t) - sizeof(((FD_MSG_t*) 0)->fields.crc16) + Len];
 
-	_FDUSART_ConstructMessage(FDInstance->link[line_free_id].buffer_line, buffer, false);
+	_FDUSART_ConstructMessage((void*)FDInstance->link[line_free_id].buffer_line, buffer, false);
 
 	uint16_t crc = CRC16_CCITT_Calculate(buffer, Len + sizeof(FD_HEADER_t) - sizeof(((FD_MSG_t*) 0)->fields.crc16));
 
@@ -934,7 +942,7 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 			(*index_message_for_read)--;
 			continue;
 		}
-		memcpy(Buf, &(currentMessage->message[0]), *Len);
+		memcpy(Buf, (FD_MSG_t*)&(currentMessage->message[0]), *Len);
 
 		return true;
 
