@@ -1157,7 +1157,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			uint8_t teste[] =
 			{ 0xAB, 0xCD, 0xEF };
-			FDUSART_SendMessage(FullDuplexSystem, 0x01, teste, sizeof(teste));
+			//FDUSART_SendMessage(FullDuplexSystem, 0x01, teste, sizeof(teste));
 			//todo: agora fazer com que o rasp envie a mensagem e ver como aqui se comporta e manda o ACK pro rasp, dai ver como ele se comporta com o ACk recebido
 		}
 

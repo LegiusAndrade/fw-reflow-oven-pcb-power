@@ -45,7 +45,7 @@
 #define FDUSART_TIME_RETRANSMIT_IF_NORESPONSE	500			// If not receive response of message sent, retransmit message and increment in error
 #define FDUSART_MAX_ERROR						5			// Max error if not receive message
 #define FDUSART_TX_TIMEOUT						10			// Timeout each byte sent
-#define FDUSART_RX_TIMEOUT						100			// Timeout receive message complete
+#define FDUSART_RX_TIMEOUT						20			// Timeout receive message complete
 
 #define MESSAGE_ID_SEND							0xBEBE		// Protocol init message for send
 #define PROTOCOL_VERSION						100			// Protocol version: 1.00
@@ -65,6 +65,8 @@
 #define FIXED_MESSAGE_SIZE (offsetof(FD_MSG_t, fields.crc16) + sizeof(((FD_MSG_t *)0)->fields.crc16))
 
 #define PACK_STRUCT 							__attribute__((__packed__))
+uint8_t teste[100][14];
+uint16_t Cnt;
 
 typedef enum
 {
@@ -122,6 +124,9 @@ struct FD_struct_t
 	FD_LINK_t link[FDUSART_BUFFER_LINES];
 	UART_HandleTypeDef *uart;
 	uint16_t size_buffer;
+	uint16_t count_delay_each_message;
+	uint16_t count_retransmission;
+	uint16_t count_message_error;
 };
 
 typedef struct
@@ -157,11 +162,6 @@ volatile FD_t *gInstances[MAX_UART_INSTANCES] =
 uint8_t gTemp_Message_Receive[FDUSART_SIZE_MAX_MESSAGE] =
 { 0 };
 
-uint16_t countDelayEachMessage = 0;
-
-uint16_t countRetransmission = 0;
-uint16_t countMessageError = 0;
-
 /********************************************************************************
  ******* VARIABLES
  *******************************************************************************/
@@ -179,7 +179,8 @@ static bool _FDUSART_CheckHeader(size_t index);
 static bool _FDUSART_CheckProtocolVersion(size_t index);
 static bool _FDUSART_CheckSizeMessage(size_t index);
 static void _FDUSART_ResetReceiving(size_t index);
-static bool _FDUSART_HandleMessageOrACK( FD_MSG_t *FDMessage, size_t search_instance, int16_t index_message_for_read);
+static bool _FDUSART_HandleMessageOrACK(FD_MSG_t *FDMessage, size_t search_instance, int16_t index_message_for_read);
+static bool _FDUSART_SendACK(FD_t *FDInstance, FD_MSG_t *Buf);
 static size_t _FDUSART_SearchUARTInstance(FD_t *FDInstance);
 static bool _FDUSART_ExtractMessageDetails(FD_MSG_t *message, uint8_t *cmd, size_t *len, size_t *sequence_number);
 static bool _FDUSART_ValidateMessageCRC(FD_MSG_t *message, size_t len);
@@ -378,8 +379,7 @@ static bool _FDUSART_CheckProtocolVersion(size_t index)
 
 static bool _FDUSART_CheckSizeMessage(size_t index)
 {
-	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[LEN_OFFSET + 1] << 8)
-			| gInstances_Receiving[index].buffer_received[LEN_OFFSET]);
+	gInstances_Receiving[index].size_message = ((uint16_t) (gInstances_Receiving[index].buffer_received[LEN_OFFSET + 1] << 8) | gInstances_Receiving[index].buffer_received[LEN_OFFSET]);
 	if (gInstances_Receiving[index].size_message <= (gInstances[index]->size_buffer - FIXED_MESSAGE_SIZE))
 	{
 		return true;
@@ -393,7 +393,7 @@ static void _FDUSART_ResetReceiving(size_t index)
 	gInstances_Receiving[index].cnt_byte_received = 0;
 }
 
-static bool _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
+static bool _FDUSART_SendACK(FD_t *FDInstance, FD_MSG_t *Buf)
 {
 	uint16_t line_free_id = 0;
 	bool success = false;
@@ -406,25 +406,25 @@ static bool _FDUSART_SendACK(FD_t *FDInstance, uint8_t *Buf, size_t Len)
 	}
 
 	/* Len outside the maximum size */
-	if (Len > FDInstance->size_buffer || Len > FDUSART_SIZE_MAX_MESSAGE)
+	if (Buf->fields.len > FDInstance->size_buffer || Buf->fields.len > FDUSART_SIZE_MAX_MESSAGE)
 	{
 		return success;
 	}
 
 	_FDUSART_ClearLine(FDInstance, line_free_id);
 
-	size_t header_offset = offsetof(FD_MSG_t, fields.header);
-	size_t data_size = offsetof(FD_MSG_t, fields.crc16) - offsetof(FD_MSG_t, fields.header) + Len;
+	size_t headerSize = sizeof(FD_MSG_t);
+	size_t totalSize = headerSize + Buf->fields.len;
 
-	memcpy(&FDInstance->link[line_free_id].buffer_line, Buf + header_offset, data_size);
+	memcpy((FD_t*) FDInstance->link[line_free_id].buffer_line, (FD_t*) Buf, totalSize);
 
 	FDInstance->link[line_free_id].buffer_line->fields.type_message = (uint8_t) MESSAGE_ACK;
-hard fault ocorrendo aqui, verificar a montagem do buffer_line, pode ser que ao montar o dado para analisar no CRC esteja fazendo merda
+
 	uint16_t crc = _FDUSART_CalcCRCProtocol((FD_MSG_t*) FDInstance->link[line_free_id].buffer_line); //Calculate CRC based into message and header
 
 	FDInstance->link[line_free_id].buffer_line->fields.crc16 = crc;
 
-	FDInstance->link[line_free_id].message_length = sizeof(((FD_MSG_t*) 0)->fields) + Len;
+	FDInstance->link[line_free_id].message_length = sizeof(((FD_MSG_t*) 0)->fields) + Buf->fields.len;
 
 	_FDUSART_MakeToSend(FDInstance, line_free_id);
 
@@ -461,12 +461,12 @@ static bool _FDUSART_HandleMessageOrACK(FD_MSG_t *FDMessage, size_t search_insta
 
 	if (currentMessageStruct->fields.type_message == MESSAGE_SEND)
 	{
-		_FDUSART_SendACK((FD_t*) gInstances[search_instance], (uint8_t*) currentMessageStruct, currentMessageStruct->fields.len);
+		_FDUSART_SendACK((FD_t*) gInstances[search_instance], (FD_MSG_t*) currentMessageStruct);
 	}
 	else
 	{
-		int16_t index_sequence_number = _FDUSART_SearchIndexSequenceNumber((FD_t*)gInstances[search_instance], currentMessageStruct->fields.sequence_number);
-		_FDUSART_ClearLine((FD_t*)gInstances[search_instance], index_sequence_number);
+		int16_t index_sequence_number = _FDUSART_SearchIndexSequenceNumber((FD_t*) gInstances[search_instance], currentMessageStruct->fields.sequence_number);
+		_FDUSART_ClearLine((FD_t*) gInstances[search_instance], index_sequence_number);
 		return false;
 	}
 	return true;
@@ -688,8 +688,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			gInstances_Receiving[i].cnt_messages_for_read = 0;
 			index_free = 0;
 		}
-		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received,
-				gInstances_Receiving[i].size_message + FIXED_MESSAGE_SIZE);
+		//memcpy(teste[Cnt++], (void*) gInstances_Receiving[i].buffer_received, gInstances_Receiving[i].size_message + FIXED_MESSAGE_SIZE);
+		if (Cnt >= 80)
+		{
+			__asm__("nop");
+		}
+		memcpy((void*) gInstances_Receiving[i].message_ready_for_read[index_free], (void*) gInstances_Receiving[i].buffer_received, gInstances_Receiving[i].size_message + FIXED_MESSAGE_SIZE);
 		_FDUSART_ResetReceiving(i);
 	}
 
@@ -791,24 +795,23 @@ bool FDUSART_InterruptControl()
 		instance = (void*) gInstances[i];
 		if (instance != NULL)
 		{
-			for (size_t line = 0; line < FDUSART_BUFFER_LINES; line++)
+			if (instance->count_delay_each_message < DELAY_EACH_MESSAGE)
+			{
+				instance->count_delay_each_message++;
+			}
+
+			for (size_t line = 0; line < FDUSART_BUFFER_LINES && !instance->flags.bits.send_message; line++)
 			{
 				/* Verifying if transmition mode */
 				if (!instance->flags.bits.send_message)
 				{
-					if (countDelayEachMessage >= DELAY_EACH_MESSAGE)
+					/* Search line ready for send */
+					if (instance->link[line].line_state == LINE_READY_FOR_SEND && instance->count_delay_each_message >= DELAY_EACH_MESSAGE)
 					{
-						countDelayEachMessage = 0;
-						/* Search line ready for send */
-						if (instance->link[line].line_state == LINE_READY_FOR_SEND)
-						{
-							/* Activated DMA for transmit message */
-							success = _FDUSART_TransmitMessage(instance, line);
-						}
+						instance->count_delay_each_message = 0;
+						/* Activated DMA for transmit message */
+						success = _FDUSART_TransmitMessage(instance, line);
 					}
-					else
-						countDelayEachMessage++;
-
 				}
 
 				if (instance->link[line].line_state == LINE_SENT_EXTRNAL || instance->link[line].line_state == LINE_SENT_DMA)
@@ -816,11 +819,11 @@ bool FDUSART_InterruptControl()
 					instance->link[line].time_retransmit--; //Decrement time for retransmit
 					if (instance->link[line].time_retransmit == 0)
 					{
-						countRetransmission++;
+						instance->count_retransmission++;
 						instance->link[line].error_timeout_cnt++; //Increment number of tentative
 						if (instance->link[line].error_timeout_cnt >= FDUSART_MAX_ERROR) //If exceded tentatives
 						{
-							countMessageError++;
+							instance->count_message_error++;
 							_FDUSART_ClearLine(instance, line);
 						}
 						else
@@ -901,7 +904,8 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 
 	return success;
 }
-
+#pragma GCC push_options
+#pragma GCC optimize ("-O0")
 bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
 {
 	// Check null pointers and valid input
@@ -913,38 +917,45 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 	if (search_instance >= MAX_UART_INSTANCES)
 		return false;
 
-	int16_t *index_message_for_read = (void*) &gInstances_Receiving[search_instance].cnt_messages_for_read;
-	while (*index_message_for_read > 0)
+	int16_t index_message_for_read = gInstances_Receiving[search_instance].cnt_messages_for_read;
+	int16_t index_message_for_read_value_original = index_message_for_read;
+	while ((int16_t) (index_message_for_read) > 0)
 	{
 		FD_MSG_t *currentMessage = malloc(sizeof(FD_MSG_t));
 		memset(currentMessage, 0, sizeof(FD_MSG_t));
 
-		_FDUSART_ConstructMessageReceived((uint8_t*) gInstances_Receiving[search_instance].message_ready_for_read[*index_message_for_read - 1], currentMessage);
+		_FDUSART_ConstructMessageReceived((uint8_t*) gInstances_Receiving[search_instance].message_ready_for_read[index_message_for_read - 1], currentMessage);
 
 		size_t sequence_number = 0;
 
 		if (!_FDUSART_ExtractMessageDetails(currentMessage, Cmd, Len, &sequence_number))
 		{
-			(*index_message_for_read)--;
+			free(currentMessage);
+			(int16_t) (index_message_for_read)--;
 			continue;
 		}
 
 		if (!_FDUSART_ValidateMessageCRC(currentMessage, *Len))
 		{
-			(*index_message_for_read)--;
+			free(currentMessage);
+			(int16_t) (index_message_for_read)--;
 			continue;
 		}
 
-		if (!_FDUSART_HandleMessageOrACK( currentMessage, search_instance, *index_message_for_read))
+		if (!_FDUSART_HandleMessageOrACK(currentMessage, search_instance, index_message_for_read))
 		{
-			(*index_message_for_read)--;
+			free(currentMessage);
+			(int16_t) (index_message_for_read)--;
 			continue;
 		}
 		memcpy(Buf, (FD_MSG_t*) &(currentMessage->message[0]), *Len);
+		free(currentMessage);
 
+		if (gInstances_Receiving[search_instance].cnt_messages_for_read >= index_message_for_read_value_original)
+			gInstances_Receiving[search_instance].cnt_messages_for_read -= index_message_for_read_value_original;
 		return true;
 
 	}
 	return false;
 }
-
+#pragma GCC pop_options
