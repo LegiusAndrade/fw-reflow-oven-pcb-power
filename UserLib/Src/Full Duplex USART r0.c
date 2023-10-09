@@ -45,7 +45,7 @@
 #define FDUSART_TIME_RETRANSMIT_IF_NORESPONSE	500			// If not receive response of message sent, retransmit message and increment in error
 #define FDUSART_MAX_ERROR						5			// Max error if not receive message
 #define FDUSART_TX_TIMEOUT						10			// Timeout each byte sent
-#define FDUSART_RX_TIMEOUT						20			// Timeout receive message complete
+#define FDUSART_RX_TIMEOUT						30			// Timeout receive message complete
 
 #define MESSAGE_ID_SEND							0xBEBE		// Protocol init message for send
 #define PROTOCOL_VERSION						100			// Protocol version: 1.00
@@ -390,6 +390,7 @@ static bool _FDUSART_CheckSizeMessage(size_t index)
 static void _FDUSART_ResetReceiving(size_t index)
 {
 	gInstances_Receiving[index].Flags.bits.rx_receiving = false;
+	gInstances_Receiving[index].time_receiving = 0;
 	gInstances_Receiving[index].cnt_byte_received = 0;
 }
 
@@ -904,6 +905,8 @@ bool FDUSART_SendMessage(FD_t *FDInstance, uint8_t Cmd, uint8_t *Buf, size_t Len
 
 	return success;
 }
+
+
 #pragma GCC push_options
 #pragma GCC optimize ("-O0")
 bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_t *Len)
@@ -951,8 +954,10 @@ bool FDUSART_Receive_Message(FD_t *FDInstance, uint8_t *Cmd, uint8_t *Buf, size_
 		memcpy(Buf, (FD_MSG_t*) &(currentMessage->message[0]), *Len);
 		free(currentMessage);
 
+		(int16_t) (index_message_for_read)--;
+
 		if (gInstances_Receiving[search_instance].cnt_messages_for_read >= index_message_for_read_value_original)
-			gInstances_Receiving[search_instance].cnt_messages_for_read -= index_message_for_read_value_original;
+			gInstances_Receiving[search_instance].cnt_messages_for_read -= index_message_for_read_value_original - index_message_for_read;
 		return true;
 
 	}
