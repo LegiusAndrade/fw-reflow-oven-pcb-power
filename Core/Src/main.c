@@ -81,8 +81,9 @@ volatile struct
 		unsigned CalculatePD :1;
 		unsigned CalculateVBUS :1;
 		unsigned CalculateVREG :1;
+		unsigned CalculateCURR :1;
 		unsigned Error :5;
-		unsigned Dummy :24;
+		unsigned Dummy :22;
 	} Flags;
 } sStatusPower;
 
@@ -115,11 +116,11 @@ FD_t *FullDuplexSystem;
 #define	HIGH			1
 #define	LOW				0
 
-/* ################# DEFINIÇÕES AD 		 	 ################# */
+/* ################# DEFINITIONS AD 		 ################# */
 #define RES_AD			4095UL			// (2^12 - 1)
 #define	VREF			33UL			//3,3V
 
-/* ################# POWERDOWN DEFINIÇÕES 	################# */
+/* ################# POWERDOWN DEFINITIONS 	 ################# */
 #define POWERDOWN_VALUE 160 //16V
 #define TIMEOUT_PD		500//ms
 #define BUFFER_PD		10
@@ -128,7 +129,7 @@ FD_t *FullDuplexSystem;
 #define PD_MULT			((VREF * (RCIMA_PD + RBAIXO_PD))/((RES_AD * RBAIXO_PD)/PD_DIV))
 #define PD_DIV			1000
 
-/* ################# VBUS DEFINIÇÕES 		################# */
+/* ################# VBUS DEFINITIONS 		 ################# */
 #define UNDERVOLTAGE_VALUE 		1000 //100V
 #define TIMEOUT_UNDERVOLTAGE	500//ms
 #define OVERVOLTAGE_VALUE 		1970 //197V
@@ -140,20 +141,26 @@ FD_t *FullDuplexSystem;
 #define VBUS_MULT		((VREF * (RCIMA_VBUS + RBAIXO_VBUS))/((RES_AD * RBAIXO_VBUS) /VBUS_DIV))
 #define VBUS_DIV		1000
 
-/* ################# VREG DEFINIÇÕES 		################# */
+/* ################# VREG DEFINITIONS 		 ################ */
 #define BUFFER_VREG		10
 #define RCIMA_VREG		300000UL
 #define RBAIXO_VREG		3900UL
 #define VREG_MULT		((VREF * (RCIMA_VREG + RBAIXO_VREG))/((RES_AD * RBAIXO_VREG) /VBUS_VREG))
 #define VREG_DIV		1000
 
-/* ################# NTC DEFINITIONS ################# */
+/* ################# CURR DEFINITIONS 		 ################# */
+#define BUFFER_CURR		10
+#define VS_TMCS1107A2U	3.3
+#define OFFSET_CURR		(0.1 * VS_TMCS1107A2U)
+#define GAIN_CURR		0.1
+
+/* ################# NTC DEFINITIONS 		 ################# */
 #define	TEMPERATURE_SHORT_CIRCUIT	1200	//120°C
 #define	TEMPERATURE_OPEN_CIRCUIT	-200	//-20°C
 #define OVERTEMPERATURE_DISSIPATOR	800		//80°C
 #define BUFFER_NTC	1000					//1000 leituras de AD
 
-/* ################# DEFINIÇÕES GERAIS ################# */
+/* ################# DEFINITIONS GENERAL	 ################# */
 #define PERIOD_LED					1000//ms
 #define PERIOD_LED_ERROR 			250//ms
 #define RELAY_INRUSH				300//ms
@@ -197,11 +204,12 @@ volatile uint16_t AdValuePD[BUFFER_PD] =
 { 0 }, AdValueVBUS[BUFFER_VBUS] =
 { 0 }, AdValueVREG[BUFFER_VREG] =
 { 0 }, AdValueNTC[BUFFER_NTC] =
+{ 0 }, AdValueCURR[BUFFER_CURR] =
 { 0 };
 uint16_t ValuePD = 0, ValueVBUS = 0, ValueVREG = 0;
-int16_t ValueNTC = 0;
+int16_t ValueNTC = 0, ValueCURR = 0;
 volatile uint16_t CntTimeoutPD = 0, CntTimeoutOvervoltage = 0, CntTimeoutUndervoltage = 0;
-volatile uint8_t CntAdValuePD = 0, CntAdValueVBUS = 0, CntAdValueVREG = 0, CntAdValueNTC = 0;
+volatile uint8_t CntAdValuePD = 0,CntAdValueCURR = 0, CntAdValueVBUS = 0, CntAdValueVREG = 0, CntAdValueNTC = 0;
 volatile uint16_t CntStatusLED = 0;
 volatile uint16_t CntStatusLEDError = 0;
 volatile uint16_t Cnt1ms = 0;
@@ -382,7 +390,20 @@ int main(void)
 			ValueVREG = (uint16_t) (((uint32_t) ValueVREG * (uint32_t) VREG_MULT) / (uint32_t) VREG_DIV);
 			Status.OutputVoltage = ValueVREG;
 		}
+		if(sStatusPower.Flags.CalculateCURR)
+		{
+			sStatusPower.Flags.CalculateCURR = false;
+			i = 0;
+			u32Temp = 0;
+			for(i = 0; i< BUFFER_CURR;i++)
+			{
+				u32Temp += AdValueCURR[i];
+			}
+			float CurrInVolt = (float)((float)((u32Temp / BUFFER_CURR)*VREF)/(float)RES_AD);
+			float CurrOffsetInVolt = GAIN_CURR * VS_TMCS1107A2U;
+			float Curr =
 
+		}
 		if (sStatusPower.Flags.CalculateNTC)
 		{
 			sStatusPower.Flags.CalculateNTC = false;
@@ -1352,32 +1373,42 @@ void DMACallbackADC1(DMA_HandleTypeDef *hdma)
 	if (CntAdValueNTC >= BUFFER_NTC)
 	{
 		//asm("NOP");
-		sStatusPower.Flags.CalculateNTC = 1;
+		sStatusPower.Flags.CalculateNTC = true;
 		CntAdValueNTC = 0;
 	}
-	else if (sStatusPower.Flags.CalculateNTC == 0)
+	else if (sStatusPower.Flags.CalculateNTC == false)
 	{
 		AdValueNTC[CntAdValueNTC++] = Adc1Val[1];
 	}
 }
 void DMACallbackADC2(DMA_HandleTypeDef *hdma)
 {
+	if (CntAdValueCURR >= BUFFER_CURR)
+	{
+		sStatusPower.Flags.CalculateCURR = true;
+		CntAdValueCURR = 0;
+	}
+	else if (sStatusPower.Flags.CalculateCURR == false)
+	{
+		AdValueCURR[CntAdValueCURR++] = Adc2Val[0];
+	}
+
 	if (CntAdValuePD >= BUFFER_PD)
 	{
-		sStatusPower.Flags.CalculatePD = 1;
+		sStatusPower.Flags.CalculatePD = true;
 		CntAdValuePD = 0;
 	}
-	else if (sStatusPower.Flags.CalculatePD == 0)
+	else if (sStatusPower.Flags.CalculatePD == false)
 	{
 		AdValuePD[CntAdValuePD++] = Adc2Val[1];
 	}
 
 	if (CntAdValueVBUS >= BUFFER_VBUS)
 	{
-		sStatusPower.Flags.CalculateVBUS = 1;
+		sStatusPower.Flags.CalculateVBUS = true;
 		CntAdValueVBUS = 0;
 	}
-	else if (sStatusPower.Flags.CalculateVBUS == 0)
+	else if (sStatusPower.Flags.CalculateVBUS == false)
 	{
 		AdValueVBUS[CntAdValueVBUS++] = Adc2Val[2];
 	}
