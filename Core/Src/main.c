@@ -52,25 +52,45 @@ typedef union
 	uint32_t ExistError;
 } t_FlagsErrors;
 
+uint32_t SerialNumber;
+
+volatile struct
+{
+	// PID Control
+	int32_t kP;
+	int32_t kI;
+	int32_t kD;
+
+	// Oven Config
+	uint16_t MaxTemperatureOven;
+	uint16_t MaxRPMFanOven;
+
+	//PCB Config
+	uint16_t MinVoltInput;
+	uint16_t MaxVoltInput;
+
+	uint16_t MinRPMFanPCB;
+	uint16_t MaxTemperaturePCB;
+
+} Config;
 volatile struct
 {
 	uint16_t PowerVoltage; //
 	uint16_t ControlVoltage; //
 	uint16_t OutputVoltage; //
-	uint16_t CurrentOutput;
+	uint16_t CurrentOutput; //
 
 	int16_t TemperatureOven; //
 	int16_t TemperaturePCB; //
 
 	uint16_t FanRPMPCB; //
 	uint16_t FanRPMOven1; //
-	uint16_t FanRPMOven2; // todo: Included in new revision PCB
+	uint16_t FanRPMOven2; // todo: Include in new revision PCB
 
 	uint32_t HourmeterHours; //
 	uint8_t HourmeterMinutes; //
 
 	t_FlagsErrors Errors; //
-
 } Status;
 
 volatile struct
@@ -98,11 +118,9 @@ enum
 
 enum
 {
+	COMM_GET_STATUS = 0, COMM_GET_SERIAL_NUMBER,
 
-	COMM_GET_STATUS = 0, COMM_GET_CONFIGURATION, COMM_GET_SERIAL_NUMBER,
-
-	COMM_SET_SERIAL_NUMBER,
-
+	COMM_SET_CONFIGURATION, COMM_SET_SERIAL_NUMBER,
 } eComm;
 
 FD_t *FullDuplexSystem;
@@ -117,8 +135,8 @@ FD_t *FullDuplexSystem;
 #define	LOW				0
 
 /* ################# DEFINITIONS AD 		 ################# */
-#define RES_AD			4095UL			// (2^12 - 1)
-#define	VREF			33UL			//3,3V
+#define RES_AD			4095UL				// (2^12 - 1)
+#define	VREF			33UL				//3,3V
 
 /* ################# POWERDOWN DEFINITIONS 	 ################# */
 #define POWERDOWN_VALUE 160 //16V
@@ -130,11 +148,11 @@ FD_t *FullDuplexSystem;
 #define PD_DIV			1000
 
 /* ################# VBUS DEFINITIONS 		 ################# */
-#define UNDERVOLTAGE_VALUE 		1000 //100V
-#define TIMEOUT_UNDERVOLTAGE	500//ms
-#define OVERVOLTAGE_VALUE 		1970 //197V
-#define TIMEOUT_OVERVOLTAGE		500//ms
-#define LOW_OPERATION	400//40V
+#define UNDERVOLTAGE_VALUE 		1000 		//100V
+#define TIMEOUT_UNDERVOLTAGE	500			//ms
+#define OVERVOLTAGE_VALUE 		1970 		//197V
+#define TIMEOUT_OVERVOLTAGE		500			//ms
+#define LOW_OPERATION	400					//40V
 #define BUFFER_VBUS		10
 #define RCIMA_VBUS		300000UL
 #define RBAIXO_VBUS		3900UL
@@ -150,9 +168,8 @@ FD_t *FullDuplexSystem;
 
 /* ################# CURR DEFINITIONS 		 ################# */
 #define BUFFER_CURR		10
-#define VS_TMCS1107A2U	3.3
-#define OFFSET_CURR		(0.1 * VS_TMCS1107A2U)
-#define GAIN_CURR		0.1
+#define AD_0A			409 //bits //Todo: In future, change this value for calibration value
+#define AD_SENSITIVY	124 //124 bits/A
 
 /* ################# NTC DEFINITIONS 		 ################# */
 #define	TEMPERATURE_SHORT_CIRCUIT	1200	//120°C
@@ -161,11 +178,11 @@ FD_t *FullDuplexSystem;
 #define BUFFER_NTC	1000					//1000 leituras de AD
 
 /* ################# DEFINITIONS GENERAL	 ################# */
-#define PERIOD_LED					1000//ms
-#define PERIOD_LED_ERROR 			250//ms
-#define RELAY_INRUSH				300//ms
-#define FAN_PCB_TIMEOUT				5000//ms
-#define FAN_1_AND_2_TIMEOUT			5000//ms
+#define PERIOD_LED					1000	//ms
+#define PERIOD_LED_ERROR 			250		//ms
+#define RELAY_INRUSH				300		//ms
+#define FAN_PCB_TIMEOUT				5000	//ms
+#define FAN_1_AND_2_TIMEOUT			5000	//ms
 
 /* ################# COEFICIENTE ANGULAR SAIDA  ################# */
 #define COEFF_A			1.0
@@ -209,11 +226,12 @@ volatile uint16_t AdValuePD[BUFFER_PD] =
 uint16_t ValuePD = 0, ValueVBUS = 0, ValueVREG = 0;
 int16_t ValueNTC = 0, ValueCURR = 0;
 volatile uint16_t CntTimeoutPD = 0, CntTimeoutOvervoltage = 0, CntTimeoutUndervoltage = 0;
-volatile uint8_t CntAdValuePD = 0,CntAdValueCURR = 0, CntAdValueVBUS = 0, CntAdValueVREG = 0, CntAdValueNTC = 0;
+volatile uint8_t CntAdValuePD = 0, CntAdValueCURR = 0, CntAdValueVBUS = 0, CntAdValueVREG = 0, CntAdValueNTC = 0;
 volatile uint16_t CntStatusLED = 0;
 volatile uint16_t CntStatusLEDError = 0;
 volatile uint16_t Cnt1ms = 0;
-volatile uint32_t IC_FanPCB_Value1 = 0, IC_Fan1_Value1 = 0, IC_FanPCB_Value2 = 0, IC_Fan1_Value2 = 0, IC_FanPCB_Difference = 0, IC_Fan1_Difference = 0, IC_FanPCB_Frequency = 0, IC_Fan1_Frequency = 0;
+volatile uint32_t IC_FanPCB_Value1 = 0, IC_Fan1_Value1 = 0, IC_FanPCB_Value2 = 0, IC_Fan1_Value2 = 0, IC_FanPCB_Difference = 0, IC_Fan1_Difference = 0,
+		IC_FanPCB_Frequency = 0, IC_Fan1_Frequency = 0;
 volatile uint8_t IC_FanPCB_IsFirstCaptured = false, IC_Fan1_IsFirstCaptured = false;
 volatile uint16_t IC_FanPCB_OvfTimer = 0, IC_Fan1_OvfTimer = 0, IC_FanPCB_RPM = 0, IC_Fan1_RPM = 0;
 volatile uint16_t CntFanPCB = 0, CntFan1 = 0, CntRelayInrush = 0;
@@ -390,19 +408,20 @@ int main(void)
 			ValueVREG = (uint16_t) (((uint32_t) ValueVREG * (uint32_t) VREG_MULT) / (uint32_t) VREG_DIV);
 			Status.OutputVoltage = ValueVREG;
 		}
-		if(sStatusPower.Flags.CalculateCURR)
+		if (sStatusPower.Flags.CalculateCURR)
 		{
 			sStatusPower.Flags.CalculateCURR = false;
 			i = 0;
 			u32Temp = 0;
-			for(i = 0; i< BUFFER_CURR;i++)
+			for (i = 0; i < BUFFER_CURR; i++)
 			{
 				u32Temp += AdValueCURR[i];
 			}
-			float CurrInVolt = (float)((float)((u32Temp / BUFFER_CURR)*VREF)/(float)RES_AD);
-			float CurrOffsetInVolt = GAIN_CURR * VS_TMCS1107A2U;
-			float Curr =
-
+			//float CurrInVolt = (float)((float)((float)((float)u32Temp / (float)BUFFER_CURR)*(float)VREF)/(float)RES_AD);
+			//float CurrOffsetInVolt = GAIN_CURR * VS_TMCS1107A2U;
+			float CurrInAD = (float) ((float) u32Temp / (float) BUFFER_CURR) - AD_0A;
+			float CurrInAmp = (float) CurrInAD / AD_SENSITIVY;
+			Status.CurrentOutput = ((float) CurrInAmp * (float) 100.0);
 		}
 		if (sStatusPower.Flags.CalculateNTC)
 		{
@@ -438,6 +457,32 @@ int main(void)
 		if (FDUSART_Receive_Message(FullDuplexSystem, &Cmd, Buf, &Len))
 		{
 			HAL_GPIO_TogglePin(LED_COMM_GPIO_Port, LED_COMM_Pin);
+
+			switch (Cmd)
+			{
+				case COMM_GET_SERIAL_NUMBER:
+				{
+					FDUSART_SendMessage(FullDuplexSystem, COMM_GET_SERIAL_NUMBER, (uint8_t*) &Config, sizeof(Config));
+				}
+					break;
+				case COMM_SET_CONFIGURATION:
+				{
+					Config = Buf;
+				}
+					break;
+				case COMM_SET_SERIAL_NUMBER:
+				{
+					SerialNumber = Buf;
+					//Todo: Save in Flash Serial Number
+				}
+					break;
+
+				default:
+				{
+
+				}
+				break;
+			}
 		}
 
 	}
@@ -1259,6 +1304,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 
 			Status.TemperatureOven = (int16_t) ((float) GetTemperatureExternal_MAX31855() * 100.0);
+
 			FDUSART_SendMessage(FullDuplexSystem, (uint8_t) COMM_GET_STATUS, (uint8_t*) &Status, sizeof(Status));
 		}
 
